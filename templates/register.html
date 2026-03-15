@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kayıt Ol - Güvenli Mesajlaşma</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsencrypt/3.3.2/jsencrypt.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .container {
+            max-width: 500px;
+            margin: 20px;
+            padding: 40px;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            color: #667eea;
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            color: #666;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #555;
+            font-weight: 500;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .key-status {
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            font-weight: 500;
+            margin: 20px 0;
+        }
+
+        .key-status.waiting {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .key-status.generating {
+            background: #e0f2fe;
+            color: #0369a1;
+            animation: pulse 1.5s infinite;
+        }
+
+        .key-status.ready {
+            background: #dcfce7;
+            color: #166534;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        .btn {
+            width: 100%;
+            padding: 15px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.3s, opacity 0.3s;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: #48bb78;
+            color: white;
+            margin-top: 10px;
+        }
+
+        .btn-secondary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(72, 187, 120, 0.4);
+        }
+
+        .auth-links {
+            text-align: center;
+            margin-top: 20px;
+        }
+
+        .auth-links a {
+            color: #667eea;
+            text-decoration: none;
+        }
+
+        .auth-links a:hover {
+            text-decoration: underline;
+        }
+
+        .error-message {
+            margin-top: 20px;
+            padding: 12px;
+            background: #fee2e2;
+            color: #991b1b;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .warning-box {
+            margin-top: 20px;
+            padding: 15px;
+            background: #fef3c7;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        .warning-box strong {
+            color: #92400e;
+            display: block;
+            margin-bottom: 10px;
+        }
+
+        .warning-box ul {
+            margin-left: 20px;
+            color: #92400e;
+        }
+
+        .warning-box li {
+            margin: 5px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📝 Kayıt Ol</h1>
+            <p>Hesap oluştur ve güvenli mesajlaşmaya başla</p>
+        </div>
+
+        <div class="warning-box">
+            <strong>🔐 ÇOK ÖNEMLİ GÜVENLİK UYARISI!</strong>
+            <ul>
+                <li>✅ Private key'iniz TARAYICINIZDA saklanacak</li>
+                <li>✅ Bu key OLMADAN mesajlarınızı çözemezsiniz</li>
+                <li>⚠️ Private key'inizi KİMSEYLE PAYLAŞMAYIN</li>
+                <li>💾 Yedek almayı unutmayın!</li>
+            </ul>
+        </div>
+
+        <form id="registerForm">
+            <div class="form-group">
+                <label for="username">Kullanıcı Adı</label>
+                <input type="text" id="username" name="username" required minlength="3" maxlength="50" placeholder="kullanici_adi">
+            </div>
+
+            <div class="form-group">
+                <label for="email">E-posta</label>
+                <input type="email" id="email" name="email" required placeholder="ornek@email.com">
+            </div>
+
+            <div class="form-group">
+                <label for="name">Ad</label>
+                <input type="text" id="name" name="name" placeholder="Adınız">
+            </div>
+
+            <div class="form-group">
+                <label for="surname">Soyad</label>
+                <input type="text" id="surname" name="surname" placeholder="Soyadınız">
+            </div>
+
+            <div id="keyStatus" class="key-status waiting">
+                ⏳ RSA anahtarları oluşturuluyor...
+            </div>
+
+            <button type="submit" class="btn btn-primary" id="registerBtn" disabled>Kayıt Ol</button>
+        </form>
+
+        <div class="auth-links">
+            <a href="/login">Zaten hesabın var mı? Giriş Yap</a> |
+            <a href="/">Ana Sayfa</a>
+        </div>
+
+        <div id="errorMessage" class="error-message" style="display: none;"></div>
+    </div>
+
+    <script>
+        (function() {
+            'use strict';
+
+            // Elementler
+            const registerForm = document.getElementById('registerForm');
+            const usernameInput = document.getElementById('username');
+            const emailInput = document.getElementById('email');
+            const keyStatus = document.getElementById('keyStatus');
+            const registerBtn = document.getElementById('registerBtn');
+            const errorMessage = document.getElementById('errorMessage');
+
+            // RSA anahtarlarını oluştur
+            console.log('🔑 RSA anahtarları oluşturuluyor...');
+            const crypt = new JSEncrypt({default_key_size: 2048});
+
+            let publicKey = null;
+            let privateKey = null;
+
+            // Key oluşturma simülasyonu
+            setTimeout(() => {
+                keyStatus.className = 'key-status generating';
+                keyStatus.innerHTML = '🔑 RSA anahtarları oluşturuluyor... (Bu 30 saniye sürebilir)';
+            }, 100);
+
+            // Key oluştur
+            setTimeout(() => {
+                try {
+                    crypt.getKey();
+                    publicKey = crypt.getPublicKey();
+                    privateKey = crypt.getPrivateKey();
+
+                    if (!publicKey || !privateKey) {
+                        throw new Error('Key oluşturulamadı!');
+                    }
+
+                    // Private key'i localStorage'a kaydet
+                    localStorage.setItem('privateKey', privateKey);
+
+                    // Key durumunu güncelle
+                    keyStatus.className = 'key-status ready';
+                    keyStatus.innerHTML = `
+                        <div style="margin-bottom: 10px;">
+                            ✅ RSA anahtarları oluşturuldu!
+                        </div>
+                        <div style="font-size: 12px; color: #666; margin-bottom: 10px;">
+                            🔐 Private key tarayıcıya kaydedildi
+                        </div>
+                    `;
+
+                    // İndirme butonu ekle
+                    const downloadBtn = document.createElement('button');
+                    downloadBtn.className = 'btn btn-secondary';
+                    downloadBtn.innerHTML = '💾 Private Key\'i İndir (Yedek)';
+                    downloadBtn.onclick = function() {
+                        const blob = new Blob([privateKey], {type: 'text/plain'});
+                        const url = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `private_key_${usernameInput.value || 'backup'}.pem`;
+                        a.click();
+                        window.URL.revokeObjectURL(url);
+
+                        alert('✅ Private key dosyaya kaydedildi!\nBu dosyayı güvenli bir yerde saklayın.');
+                    };
+
+                    keyStatus.appendChild(downloadBtn);
+
+                    // Kayıt butonunu aktif et
+                    registerBtn.disabled = false;
+
+                    console.log('✅ RSA anahtarları oluşturuldu');
+                    console.log('📌 Private key kaydedildi');
+
+                } catch (error) {
+                    console.error('❌ Key oluşturma hatası:', error);
+                    keyStatus.className = 'key-status waiting';
+                    keyStatus.innerHTML = '❌ Key oluşturulamadı! Sayfayı yenileyin.';
+                }
+            }, 2000);
+
+            // Form submit
+            registerForm.addEventListener('submit', async function(e) {
+                e.preventDefault();
+
+                // Private key kontrolü
+                privateKey = localStorage.getItem('privateKey');
+                if (!privateKey) {
+                    alert('❌ Private key bulunamadı! Lütfen sayfayı yenileyin.');
+                    return;
+                }
+
+                // Form validasyonu
+                const username = usernameInput.value.trim();
+                const email = emailInput.value.trim();
+                const name = document.getElementById('name').value.trim();
+                const surname = document.getElementById('surname').value.trim();
+
+                if (!username || !email) {
+                    errorMessage.textContent = 'Kullanıcı adı ve email zorunludur!';
+                    errorMessage.style.display = 'block';
+                    return;
+                }
+
+                if (username.length < 3 || username.length > 50) {
+                    errorMessage.textContent = 'Kullanıcı adı 3-50 karakter arası olmalıdır!';
+                    errorMessage.style.display = 'block';
+                    return;
+                }
+
+                if (!email.includes('@') || !email.includes('.')) {
+                    errorMessage.textContent = 'Geçerli bir email adresi giriniz!';
+                    errorMessage.style.display = 'block';
+                    return;
+                }
+
+                // Form verilerini hazırla
+                const formData = {
+                    username: username,
+                    email: email,
+                    name: name,
+                    surname: surname,
+                    public_key: publicKey
+                };
+
+                console.log('📤 Kayıt isteği gönderiliyor...', formData);
+
+                // Butonu devre dışı bırak
+                registerBtn.disabled = true;
+                registerBtn.textContent = 'Kaydediliyor...';
+
+                try {
+                    const response = await fetch('/api/register', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(formData)
+                    });
+
+                    const data = await response.json();
+
+                    if (response.ok) {
+                        // Token ve kullanıcı bilgilerini kaydet
+                        localStorage.setItem('token', data.token);
+                        localStorage.setItem('userId', data.user_id);
+                        localStorage.setItem('username', data.username);
+
+                        // Başarılı kayıt mesajı
+                        alert(`
+✅ KAYIT BAŞARILI!
+
+🔐 PRIVATE KEY TARAYICINIZA KAYDEDİLDİ
+⚠️ Bu key olmadan mesajlarınızı çözemezsiniz
+💾 Yedek aldığınızdan emin olun
+
+Yönlendiriliyorsunuz...
+                        `);
+
+                        window.location.href = '/chat';
+                    } else {
+                        errorMessage.textContent = data.error || 'Kayıt başarısız!';
+                        errorMessage.style.display = 'block';
+
+                        registerBtn.disabled = false;
+                        registerBtn.textContent = 'Kayıt Ol';
+                    }
+
+                } catch (error) {
+                    console.error('❌ Bağlantı hatası:', error);
+                    errorMessage.textContent = 'Sunucuya bağlanılamadı!';
+                    errorMessage.style.display = 'block';
+
+                    registerBtn.disabled = false;
+                    registerBtn.textContent = 'Kayıt Ol';
+                }
+            });
+
+            // Input değişikliklerinde error mesajını gizle
+            usernameInput.addEventListener('input', function() {
+                errorMessage.style.display = 'none';
+            });
+
+            emailInput.addEventListener('input', function() {
+                errorMessage.style.display = 'none';
+            });
+
+        })();
+    </script>
+</body>
+</html>

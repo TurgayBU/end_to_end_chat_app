@@ -1,0 +1,1075 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sohbet - Güvenli Mesajlaşma</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsencrypt/3.3.2/jsencrypt.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+            background: #f7fafc;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .chat-container {
+            display: grid;
+            grid-template-columns: 300px 1fr;
+            height: 100vh;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            background: #2d3748;
+            color: white;
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid #4a5568;
+        }
+
+        .user-info {
+            padding: 20px;
+            background: #1a202c;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .user-info h3 {
+            margin: 0;
+            font-size: 1.1em;
+            color: white;
+        }
+
+        .user-actions {
+            display: flex;
+            gap: 5px;
+        }
+
+        .btn-small {
+            padding: 5px 10px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: opacity 0.3s;
+        }
+
+        .btn-small:hover {
+            opacity: 0.8;
+        }
+
+        #backupKeyBtn {
+            background-color: #48bb78;
+            color: white;
+        }
+
+        #logoutBtn {
+            background-color: #e53e3e;
+            color: white;
+        }
+
+        .search-box {
+            padding: 15px;
+            display: flex;
+            gap: 10px;
+            background: #2d3748;
+        }
+
+        .search-box input {
+            flex: 1;
+            padding: 8px 12px;
+            border: 1px solid #4a5568;
+            border-radius: 5px;
+            background: #1a202c;
+            color: white;
+            font-size: 14px;
+        }
+
+        .search-box input::placeholder {
+            color: #a0aec0;
+        }
+
+        .search-box input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .search-box button {
+            padding: 8px 15px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .search-box button:hover {
+            background: #5a67d8;
+        }
+
+        .user-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+
+        .user-item {
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 5px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            transition: background 0.3s;
+            position: relative;
+        }
+
+        .user-item:hover {
+            background: #4a5568;
+        }
+
+        .user-item.selected {
+            background: #667eea;
+        }
+
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            background: #667eea;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+
+        .user-details {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .user-name {
+            font-weight: 600;
+            font-size: 14px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .user-fullname {
+            font-size: 12px;
+            color: #a0aec0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .new-message-badge {
+            width: 10px;
+            height: 10px;
+            background-color: #48bb78;
+            border-radius: 50%;
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+
+        .loading, .no-users {
+            padding: 20px;
+            text-align: center;
+            color: #a0aec0;
+        }
+
+        /* Main Chat */
+        .main-chat {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            background: #f7fafc;
+        }
+
+        .chat-header {
+            padding: 20px;
+            background: white;
+            border-bottom: 1px solid #e2e8f0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+
+        .chat-header h2 {
+            color: #2d3748;
+            margin-bottom: 5px;
+            font-size: 1.5em;
+        }
+
+        .chat-header p {
+            color: #718096;
+            font-size: 14px;
+        }
+
+        .messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .welcome-message {
+            text-align: center;
+            padding: 40px;
+            color: #718096;
+            font-size: 1.1em;
+        }
+
+        .no-messages {
+            text-align: center;
+            padding: 40px;
+            color: #718096;
+            font-style: italic;
+        }
+
+        .message {
+            max-width: 70%;
+            padding: 12px;
+            border-radius: 12px;
+            position: relative;
+            animation: fadeIn 0.3s;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .message.incoming {
+            align-self: flex-start;
+            background: white;
+            border: 1px solid #e2e8f0;
+        }
+
+        .message.outgoing {
+            align-self: flex-end;
+            background: #667eea;
+            color: white;
+        }
+
+        .message-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+            font-size: 12px;
+        }
+
+        .message.incoming .message-header {
+            color: #718096;
+        }
+
+        .message.outgoing .message-header {
+            color: rgba(255,255,255,0.8);
+        }
+
+        .message-body {
+            word-wrap: break-word;
+            line-height: 1.5;
+            font-size: 14px;
+        }
+
+        .message-status {
+            text-align: right;
+            font-size: 11px;
+            margin-top: 5px;
+            color: #a0aec0;
+        }
+
+        .message.outgoing .message-status {
+            color: rgba(255,255,255,0.8);
+        }
+
+        .message-time {
+            font-size: 11px;
+        }
+
+        .message-input {
+            padding: 20px;
+            background: white;
+            border-top: 1px solid #e2e8f0;
+        }
+
+        .message-input textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e2e8f0;
+            border-radius: 10px;
+            resize: none;
+            font-family: inherit;
+            font-size: 14px;
+            margin-bottom: 10px;
+            transition: border-color 0.3s;
+        }
+
+        .message-input textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .input-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+
+        .btn-primary {
+            padding: 10px 20px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background 0.3s;
+        }
+
+        .btn-primary:hover {
+            background: #5a67d8;
+        }
+
+        .btn-secondary {
+            padding: 10px 20px;
+            background: #48bb78;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background 0.3s;
+        }
+
+        .btn-secondary:hover {
+            background: #38a169;
+        }
+
+        /* Notification */
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 25px;
+            background: #667eea;
+            color: white;
+            border-radius: 8px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            animation: slideIn 0.3s;
+            z-index: 1000;
+            font-weight: 500;
+            max-width: 300px;
+            word-wrap: break-word;
+        }
+
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        /* Key Warning */
+        .key-warning {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            right: 20px;
+            background: #fef3c7;
+            color: #92400e;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            z-index: 1000;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+
+        .key-warning button {
+            margin-left: 10px;
+            padding: 5px 15px;
+            background: #92400e;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        @media (max-width: 768px) {
+            .chat-container {
+                grid-template-columns: 1fr;
+            }
+
+            .sidebar {
+                display: none;
+            }
+
+            .message {
+                max-width: 85%;
+            }
+
+            .notification {
+                left: 20px;
+                right: 20px;
+                max-width: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="user-info">
+                <h3>👤 <span id="username"></span></h3>
+                <div class="user-actions">
+                    <button id="backupKeyBtn" class="btn-small" title="Private Key Yedekle">💾</button>
+                    <button id="logoutBtn" class="btn-small">Çıkış</button>
+                </div>
+            </div>
+
+            <div class="search-box">
+                <input type="text" id="searchUser" placeholder="Kullanıcı ara...">
+                <button id="searchBtn">🔍</button>
+            </div>
+
+            <div class="user-list" id="userList">
+                <div class="loading">Kullanıcılar yükleniyor...</div>
+            </div>
+        </div>
+
+        <!-- Main Chat -->
+        <div class="main-chat">
+            <div class="chat-header" id="chatHeader">
+                <h2>💬 Sohbet</h2>
+                <p id="selectedUserInfo">Bir kullanıcı seçin</p>
+            </div>
+
+            <div class="messages" id="messages">
+                <div class="welcome-message">
+                    👋 Hoş geldin! Sol taraftan bir kullanıcı seçerek mesajlaşmaya başlayabilirsin.
+                </div>
+            </div>
+
+            <div class="message-input" id="messageInputArea" style="display: none;">
+                <textarea id="messageText" placeholder="Mesajınızı yazın..." rows="3"></textarea>
+                <div class="input-actions">
+                    <button id="sendBtn" class="btn-primary">📨 Gönder</button>
+                    <button id="fileBtn" class="btn-secondary">📁 Dosya</button>
+                    <input type="file" id="fileInput" style="display: none;">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="notification" class="notification" style="display: none;"></div>
+    <div id="keyWarning" class="key-warning" style="display: none;">
+        ⚠️ Private key bulunamadı! Mesajları çözemezsiniz.
+        <button onclick="window.location.href='/register'">Kayıt Ol</button>
+        <button id="loadKeyBtn">Key Yükle</button>
+    </div>
+
+    <script>
+        (function() {
+            'use strict';
+
+            // Global değişkenler
+            let socket;
+            let currentUser = {
+                id: localStorage.getItem('userId'),
+                username: localStorage.getItem('username'),
+                token: localStorage.getItem('token')
+            };
+
+            let selectedUser = null;
+            let messages = [];
+            let decryptor = null;
+            let reconnectAttempts = 0;
+            let messageCheckInterval = null;
+
+            // Elementler
+            const messagesDiv = document.getElementById('messages');
+            const userListDiv = document.getElementById('userList');
+            const chatHeader = document.getElementById('chatHeader');
+            const selectedUserInfo = document.getElementById('selectedUserInfo');
+            const messageInputArea = document.getElementById('messageInputArea');
+            const messageText = document.getElementById('messageText');
+            const sendBtn = document.getElementById('sendBtn');
+            const fileBtn = document.getElementById('fileBtn');
+            const fileInput = document.getElementById('fileInput');
+            const searchInput = document.getElementById('searchUser');
+            const searchBtn = document.getElementById('searchBtn');
+            const backupKeyBtn = document.getElementById('backupKeyBtn');
+            const logoutBtn = document.getElementById('logoutBtn');
+            const notification = document.getElementById('notification');
+            const keyWarning = document.getElementById('keyWarning');
+            const loadKeyBtn = document.getElementById('loadKeyBtn');
+
+            // ========== BAŞLANGIÇ KONTROLLERİ ==========
+            function init() {
+                console.log('🚀 Chat sayfası başlatılıyor...');
+
+                // Kullanıcı kontrolü
+                if (!currentUser.token || !currentUser.id || !currentUser.username) {
+                    console.log('❌ Kullanıcı bilgileri eksik, login\'e yönlendiriliyor');
+                    window.location.href = '/login';
+                    return;
+                }
+
+                // Kullanıcı adını göster
+                document.getElementById('username').textContent = currentUser.username;
+
+                // Private key kontrolü
+                const privateKey = localStorage.getItem('privateKey');
+                if (!privateKey) {
+                    console.warn('⚠️ Private key bulunamadı!');
+                    keyWarning.style.display = 'block';
+                } else {
+                    try {
+                        decryptor = new JSEncrypt();
+                        decryptor.setPrivateKey(privateKey);
+
+                        // Test çözme
+                        const test = decryptor.decrypt(decryptor.encrypt('test'));
+                        if (test !== 'test') {
+                            throw new Error('Private key doğrulama başarısız');
+                        }
+
+                        console.log('✅ Private key doğrulandı');
+                        keyWarning.style.display = 'none';
+
+                    } catch (error) {
+                        console.error('❌ Private key hatası:', error);
+                        localStorage.removeItem('privateKey');
+                        keyWarning.style.display = 'block';
+                    }
+                }
+
+                // Socket bağlantısını başlat
+                connectSocket();
+
+                // Periyodik mesaj kontrolü
+                startMessageCheck();
+
+                // Kullanıcı listesini yükle
+                updateUserList();
+
+                // Event listeners
+                setupEventListeners();
+            }
+
+            // ========== EVENT LISTENERS ==========
+            function setupEventListeners() {
+                // Kullanıcı ara
+                searchBtn.addEventListener('click', updateUserList);
+                searchInput.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') updateUserList();
+                });
+
+                // Mesaj gönderme
+                sendBtn.addEventListener('click', sendMessage);
+                messageText.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        sendMessage();
+                    }
+                });
+
+                // Dosya gönderme
+                fileBtn.addEventListener('click', () => fileInput.click());
+                fileInput.addEventListener('change', sendFile);
+
+                // Private key yedekleme
+                backupKeyBtn.addEventListener('click', backupPrivateKey);
+
+                // Key yükleme
+                loadKeyBtn.addEventListener('click', loadPrivateKey);
+
+                // Çıkış
+                logoutBtn.addEventListener('click', logout);
+            }
+
+            // ========== SOCKET.IO BAĞLANTISI ==========
+            function connectSocket() {
+                console.log('🔄 Socket bağlanıyor...');
+
+                try {
+                    socket = io({
+                        transports: ['websocket', 'polling'],
+                        reconnection: true,
+                        reconnectionAttempts: 10,
+                        reconnectionDelay: 1000,
+                        reconnectionDelayMax: 5000,
+                        timeout: 20000
+                    });
+
+                    socket.on('connect', () => {
+                        console.log('✅ Socket bağlandı! ID:', socket.id);
+                        reconnectAttempts = 0;
+
+                        if (currentUser.token) {
+                            socket.emit('authenticate', {token: currentUser.token});
+                        }
+                    });
+
+                    socket.on('connect_error', (error) => {
+                        console.error('❌ Socket bağlantı hatası:', error);
+                        reconnectAttempts++;
+
+                        if (reconnectAttempts > 5) {
+                            showNotification('⚠️ Sunucuya bağlanılamıyor', 'error');
+                        }
+                    });
+
+                    socket.on('disconnect', (reason) => {
+                        console.log('🔴 Socket bağlantısı koptu:', reason);
+                    });
+
+                    socket.on('authenticated', (data) => {
+                        if (data.status === 'success') {
+                            console.log('✅ Socket doğrulandı');
+                        } else {
+                            console.error('❌ Socket doğrulama başarısız');
+                        }
+                    });
+
+                    socket.on('new_message', (data) => {
+                        console.log('🔔 Yeni mesaj geldi:', data);
+                        showNotification(`📨 ${data.sender_username} yeni mesaj gönderdi`);
+
+                        if (selectedUser && selectedUser.id == data.sender_id) {
+                            loadMessages(selectedUser.id);
+                        } else {
+                            updateUserList();
+                        }
+                    });
+
+                    socket.on('new_file', (data) => {
+                        console.log('📁 Yeni dosya geldi:', data);
+                        showNotification(`📁 ${data.sender_username} dosya gönderdi: ${data.file_name}`);
+
+                        if (selectedUser && selectedUser.id == data.sender_id) {
+                            loadMessages(selectedUser.id);
+                        }
+                    });
+
+                    socket.on('message_read', (data) => {
+                        console.log('✓ Mesaj okundu:', data);
+                        if (selectedUser && data.reader_id == selectedUser.id) {
+                            loadMessages(selectedUser.id);
+                        }
+                    });
+
+                } catch (error) {
+                    console.error('❌ Socket oluşturma hatası:', error);
+                }
+            }
+
+            // ========== PERİYODİK MESAJ KONTROLÜ ==========
+            function startMessageCheck() {
+                if (messageCheckInterval) {
+                    clearInterval(messageCheckInterval);
+                }
+
+                messageCheckInterval = setInterval(() => {
+                    if (selectedUser) {
+                        checkNewMessages(selectedUser.id);
+                    }
+                }, 5000);
+            }
+
+            async function checkNewMessages(userId) {
+                try {
+                    const response = await fetch('/api/messages', {
+                        headers: {'Authorization': `Bearer ${currentUser.token}`}
+                    });
+
+                    if (!response.ok) return;
+
+                    const allMessages = await response.json();
+
+                    const lastMessage = messages.length > 0 ? messages[0] : null;
+                    const newMessages = allMessages.filter(m =>
+                        ((m.sender_id == userId && m.user_id == currentUser.id) ||
+                         (m.sender_id == currentUser.id && m.user_id == userId)) &&
+                        (!lastMessage || new Date(m.sent_at) > new Date(lastMessage.sent_at))
+                    );
+
+                    if (newMessages.length > 0) {
+                        console.log('📨 Yeni mesaj bulundu (polling):', newMessages.length);
+                        loadMessages(userId);
+                    }
+
+                } catch (error) {
+                    console.error('Mesaj kontrol hatası:', error);
+                }
+            }
+
+            // ========== KULLANICI İŞLEMLERİ ==========
+            async function updateUserList() {
+                const query = searchInput.value;
+
+                try {
+                    const response = await fetch(`/api/users/search?q=${query}`, {
+                        headers: {'Authorization': `Bearer ${currentUser.token}`}
+                    });
+
+                    if (!response.ok) throw new Error('Kullanıcı listesi alınamadı');
+
+                    const users = await response.json();
+
+                    if (users.length === 0) {
+                        userListDiv.innerHTML = '<div class="no-users">🔍 Kullanıcı bulunamadı</div>';
+                        return;
+                    }
+
+                    userListDiv.innerHTML = users.map(user => {
+                        const isSelected = selectedUser && selectedUser.id == user.user_id;
+                        return `
+                            <div class="user-item ${isSelected ? 'selected' : ''}"
+                                 onclick="selectUser(${user.user_id}, '${user.username}')">
+                                <div class="user-avatar">👤</div>
+                                <div class="user-details">
+                                    <div class="user-name">${user.username}</div>
+                                    <div class="user-fullname">${user.name || ''} ${user.surname || ''}</div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+
+                } catch (error) {
+                    console.error('Kullanıcı listesi hatası:', error);
+                    userListDiv.innerHTML = '<div class="no-users">❌ Yüklenemedi</div>';
+                }
+            }
+
+            // Kullanıcı seçme fonksiyonunu global yap
+            window.selectUser = function(userId, username) {
+                console.log(`👤 Kullanıcı seçildi: ${username} (ID: ${userId})`);
+                selectedUser = {id: userId, username: username};
+
+                chatHeader.innerHTML = `
+                    <h2>💬 ${username}</h2>
+                    <p>Uçtan uca şifreli sohbet</p>
+                `;
+                selectedUserInfo.textContent = `${username} ile sohbet ediyorsun`;
+                messageInputArea.style.display = 'block';
+
+                updateUserList();
+                loadMessages(userId);
+            };
+
+            // ========== MESAJ İŞLEMLERİ ==========
+            async function loadMessages(userId) {
+                try {
+                    const response = await fetch('/api/messages', {
+                        headers: {'Authorization': `Bearer ${currentUser.token}`}
+                    });
+
+                    if (!response.ok) throw new Error('Mesajlar alınamadı');
+
+                    const allMessages = await response.json();
+
+                    const filteredMessages = allMessages.filter(m =>
+                        (m.sender_id == userId && m.user_id == currentUser.id) ||
+                        (m.sender_id == currentUser.id && m.user_id == userId)
+                    );
+
+                    messages = filteredMessages;
+                    displayMessages(filteredMessages);
+
+                    // Okunmamış mesajları işaretle
+                    filteredMessages.forEach(m => {
+                        if (m.user_id == currentUser.id && !m.is_read) {
+                            fetch(`/api/messages/${m.message_id}/read`, {
+                                method: 'POST',
+                                headers: {'Authorization': `Bearer ${currentUser.token}`}
+                            }).catch(err => console.error('Okundu işaretleme hatası:', err));
+                        }
+                    });
+
+                } catch (error) {
+                    console.error('Mesaj yükleme hatası:', error);
+                    showNotification('❌ Mesajlar yüklenemedi', 'error');
+                }
+            }
+
+            function displayMessages(messages) {
+                messagesDiv.innerHTML = '';
+
+                if (messages.length === 0) {
+                    messagesDiv.innerHTML = '<div class="no-messages">📭 Henüz mesaj yok. İlk mesajı sen gönder!</div>';
+                    return;
+                }
+
+                messages.sort((a, b) => new Date(a.sent_at) - new Date(b.sent_at));
+
+                messages.forEach(msg => {
+                    let displayText = '';
+                    let messageClass = '';
+                    let senderName = '';
+                    let time = new Date(msg.sent_at).toLocaleTimeString('tr-TR', {hour: '2-digit', minute: '2-digit'});
+
+                    if (msg.sender_id == currentUser.id) {
+                        // Gönderilen mesaj
+                        messageClass = 'outgoing';
+                        senderName = 'Sen';
+                        displayText = msg.message_type === 'text' ? '📤 [GÖNDERDİĞİN MESAJ]' : '📁 [GÖNDERDİĞİN DOSYA]';
+                    } else {
+                        // Gelen mesaj
+                        messageClass = 'incoming';
+                        senderName = msg.sender_username || 'Bilinmeyen';
+
+                        // Mesajı çözmeyi dene
+                        if (decryptor && msg.encrypted_aes_key) {
+                            try {
+                                const aesKeyHex = decryptor.decrypt(msg.encrypted_aes_key);
+                                if (aesKeyHex) {
+                                    const decrypted = CryptoJS.AES.decrypt(msg.encrypted_message, aesKeyHex);
+                                    displayText = decrypted.toString(CryptoJS.enc.Utf8);
+
+                                    if (!displayText) {
+                                        displayText = '❌ [ÇÖZÜLEMEDİ]';
+                                    }
+                                } else {
+                                    displayText = '🔐 [ŞİFRELİ MESAJ]';
+                                }
+                            } catch (error) {
+                                console.error('Mesaj çözme hatası:', error);
+                                displayText = '❌ [ÇÖZÜLEMEDİ]';
+                            }
+                        } else {
+                            displayText = '🔐 [ŞİFRELİ MESAJ]';
+                        }
+                    }
+
+                    const messageHtml = `
+                        <div class="message ${messageClass}">
+                            <div class="message-header">
+                                <strong>${senderName}</strong>
+                                <span class="message-time">${time}</span>
+                            </div>
+                            <div class="message-body">${displayText}</div>
+                            ${msg.sender_id == currentUser.id ?
+                              `<div class="message-status">${msg.is_read ? '✓✓' : '✓'}</div>` : ''}
+                        </div>
+                    `;
+
+                    messagesDiv.innerHTML += messageHtml;
+                });
+
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            }
+
+            async function sendMessage() {
+                const text = messageText.value.trim();
+
+                if (!text || !selectedUser) {
+                    showNotification('❌ Mesaj yazın ve alıcı seçin', 'error');
+                    return;
+                }
+
+                if (!decryptor) {
+                    showNotification('❌ Private key bulunamadı!', 'error');
+                    return;
+                }
+
+                try {
+                    // Alıcının public key'ini al
+                    const keyResponse = await fetch(`/api/users/${selectedUser.id}/public-key`, {
+                        headers: {'Authorization': `Bearer ${currentUser.token}`}
+                    });
+
+                    if (!keyResponse.ok) throw new Error('Public key alınamadı');
+
+                    const keyData = await keyResponse.json();
+                    const receiverPublicKey = keyData.public_key;
+
+                    // Rastgele AES key oluştur
+                    const aesKey = CryptoJS.lib.WordArray.random(32);
+                    const aesKeyHex = aesKey.toString(CryptoJS.enc.Hex);
+
+                    // Mesajı AES ile şifrele
+                    const encryptedMessage = CryptoJS.AES.encrypt(text, aesKeyHex).toString();
+
+                    // AES key'i RSA ile şifrele
+                    const encryptor = new JSEncrypt();
+                    encryptor.setPublicKey(receiverPublicKey);
+                    const encryptedAesKey = encryptor.encrypt(aesKeyHex);
+
+                    if (!encryptedAesKey) {
+                        throw new Error('AES key şifrelenemedi');
+                    }
+
+                    // Sunucuya gönder
+                    const response = await fetch('/api/messages/send', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${currentUser.token}`
+                        },
+                        body: JSON.stringify({
+                            receiver_id: selectedUser.id,
+                            encrypted_message: encryptedMessage,
+                            encrypted_aes_key: encryptedAesKey,
+                            message_type: 'text'
+                        })
+                    });
+
+                    if (response.ok) {
+                        messageText.value = '';
+                        loadMessages(selectedUser.id);
+                    } else {
+                        const error = await response.json();
+                        showNotification(`❌ ${error.error || 'Mesaj gönderilemedi'}`, 'error');
+                    }
+
+                } catch (error) {
+                    console.error('Mesaj gönderme hatası:', error);
+                    showNotification('❌ Mesaj gönderilemedi', 'error');
+                }
+            }
+
+            // ========== DOSYA İŞLEMLERİ ==========
+            async function sendFile() {
+                const file = fileInput.files[0];
+
+                if (!file || !selectedUser) {
+                    showNotification('❌ Dosya seçin ve alıcı seçin', 'error');
+                    return;
+                }
+
+                showNotification('📁 Dosya gönderme henüz aktif değil', 'info');
+                fileInput.value = '';
+            }
+
+            // ========== PRIVATE KEY İŞLEMLERİ ==========
+            function backupPrivateKey() {
+                const privateKey = localStorage.getItem('privateKey');
+
+                if (!privateKey) {
+                    showNotification('❌ Yedeklenecek private key bulunamadı', 'error');
+                    return;
+                }
+
+                const blob = new Blob([privateKey], {type: 'text/plain'});
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `private_key_${currentUser.username}_${new Date().toISOString().slice(0,10)}.pem`;
+                a.click();
+                window.URL.revokeObjectURL(url);
+
+                showNotification('✅ Private key yedeklendi', 'success');
+            }
+
+            function loadPrivateKey() {
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.accept = '.pem,.txt,.key';
+
+                input.onchange = function(e) {
+                    const file = e.target.files[0];
+                    if (!file) return;
+
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        const privateKey = e.target.result;
+
+                        try {
+                            const testDecryptor = new JSEncrypt();
+                            testDecryptor.setPrivateKey(privateKey);
+
+                            const test = testDecryptor.decrypt(testDecryptor.encrypt('test'));
+                            if (test !== 'test') {
+                                throw new Error('Geçersiz private key');
+                            }
+
+                            localStorage.setItem('privateKey', privateKey);
+                            decryptor = testDecryptor;
+
+                            keyWarning.style.display = 'none';
+                            showNotification('✅ Private key yüklendi', 'success');
+
+                            if (selectedUser) {
+                                loadMessages(selectedUser.id);
+                            }
+
+                        } catch (error) {
+                            console.error('Private key yükleme hatası:', error);
+                            showNotification('❌ Geçersiz private key', 'error');
+                        }
+                    };
+
+                    reader.readAsText(file);
+                };
+
+                input.click();
+            }
+
+            // ========== BİLDİRİM ==========
+            function showNotification(message, type = 'info') {
+                notification.textContent = message;
+                notification.style.display = 'block';
+
+                if (type === 'success') {
+                    notification.style.backgroundColor = '#48bb78';
+                } else if (type === 'error') {
+                    notification.style.backgroundColor = '#f56565';
+                } else {
+                    notification.style.backgroundColor = '#667eea';
+                }
+
+                setTimeout(() => {
+                    notification.style.display = 'none';
+                }, 3000);
+            }
+
+            // ========== ÇIKIŞ ==========
+            function logout() {
+                if (messageCheckInterval) {
+                    clearInterval(messageCheckInterval);
+                }
+
+                if (socket) {
+                    socket.disconnect();
+                }
+
+                localStorage.clear();
+                window.location.href = '/';
+            }
+
+            // ========== TEMİZLİK ==========
+            window.addEventListener('beforeunload', function() {
+                if (messageCheckInterval) {
+                    clearInterval(messageCheckInterval);
+                }
+                if (socket) {
+                    socket.disconnect();
+                }
+            });
+
+            // ========== BAŞLAT ==========
+            init();
+
+        })();
+    </script>
+</body>
+</html>

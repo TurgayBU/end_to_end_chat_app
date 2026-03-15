@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Giriş Yap - Güvenli Mesajlaşma</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .container {
+            max-width: 400px;
+            margin: 20px;
+            padding: 40px;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            color: #667eea;
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            color: #666;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #555;
+            font-weight: 500;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 15px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.3s, opacity 0.3s;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            background: #48bb78;
+            color: white;
+            margin-top: 10px;
+        }
+
+        .btn-secondary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(72, 187, 120, 0.4);
+        }
+
+        .auth-links {
+            text-align: center;
+            margin-top: 20px;
+        }
+
+        .auth-links a {
+            color: #667eea;
+            text-decoration: none;
+        }
+
+        .auth-links a:hover {
+            text-decoration: underline;
+        }
+
+        .error-message {
+            margin-top: 20px;
+            padding: 12px;
+            background: #fee2e2;
+            color: #991b1b;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .success-message {
+            margin-top: 20px;
+            padding: 12px;
+            background: #dcfce7;
+            color: #166534;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .warning-box {
+            margin-top: 20px;
+            padding: 15px;
+            background: #fef3c7;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        .file-input-group {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+
+        .file-input-group label {
+            display: block;
+            margin-bottom: 10px;
+            color: #555;
+            font-weight: 500;
+        }
+
+        .file-input-group input[type="file"] {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            background: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔑 Giriş Yap</h1>
+            <p>Hesabına giriş yap ve mesajlaşmaya başla</p>
+        </div>
+
+        <div class="warning-box" id="keyWarning" style="display: none;">
+            <strong>⚠️ Private Key Bulunamadı!</strong>
+            <p style="margin-top: 10px;">Mesajlarınızı çözmek için private key'iniz gerekli.</p>
+        </div>
+
+        <div class="file-input-group">
+            <label>📂 Private Key Yükle (Eğer varsa)</label>
+            <input type="file" id="privateKeyFile" accept=".pem,.txt,.key">
+            <button id="loadPrivateKey" class="btn btn-secondary" style="margin-top: 10px;">🔑 Key Yükle</button>
+        </div>
+
+        <form id="loginForm">
+            <div class="form-group">
+                <label for="username">Kullanıcı Adı</label>
+                <input type="text" id="username" name="username" required placeholder="kullanici_adi">
+            </div>
+
+            <button type="submit" class="btn btn-primary">Giriş Yap</button>
+        </form>
+
+        <div class="auth-links">
+            <a href="/register">Hesabın yok mu? Kayıt Ol</a> |
+            <a href="/">Ana Sayfa</a>
+        </div>
+
+        <div id="message" class="error-message" style="display: none;"></div>
+    </div>
+
+    <script>
+        (function() {
+            'use strict';
+
+            const loginForm = document.getElementById('loginForm');
+            const usernameInput = document.getElementById('username');
+            const privateKeyFile = document.getElementById('privateKeyFile');
+            const loadPrivateKeyBtn = document.getElementById('loadPrivateKey');
+            const keyWarning = document.getElementById('keyWarning');
+            const messageDiv = document.getElementById('message');
+
+            // Sayfa yüklendiğinde private key kontrolü
+            function checkPrivateKey() {
+                const privateKey = localStorage.getItem('privateKey');
+                if (!privateKey) {
+                    keyWarning.style.display = 'block';
+                } else {
+                    keyWarning.style.display = 'none';
+                }
+            }
+
+            checkPrivateKey();
+
+            // Private key yükle
+            loadPrivateKeyBtn.addEventListener('click', function() {
+                const file = privateKeyFile.files[0];
+                if (!file) {
+                    alert('❌ Lütfen bir dosya seçin!');
+                    return;
+                }
+
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const privateKey = e.target.result;
+
+                    // Basit format kontrolü
+                    if (!privateKey.includes('BEGIN') || !privateKey.includes('PRIVATE KEY')) {
+                        if (!confirm('⚠️ Bu dosya geçerli bir private key gibi görünmüyor. Yine de yüklemek istiyor musunuz?')) {
+                            return;
+                        }
+                    }
+
+                    localStorage.setItem('privateKey', privateKey);
+
+                    messageDiv.className = 'success-message';
+                    messageDiv.textContent = '✅ Private key başarıyla yüklendi!';
+                    messageDiv.style.display = 'block';
+
+                    keyWarning.style.display = 'none';
+
+                    setTimeout(() => {
+                        messageDiv.style.display = 'none';
+                    }, 3000);
+                };
+
+                reader.readAsText(file);
+            });
+
+            // Login form submit
+            loginForm.addEventListener('submit', async function(e) {
+                e.preventDefault();
+
+                const username = usernameInput.value.trim();
+
+                if (!username) {
+                    messageDiv.className = 'error-message';
+                    messageDiv.textContent = 'Kullanıcı adı gerekli!';
+                    messageDiv.style.display = 'block';
+                    return;
+                }
+
+                // Private key kontrolü (uyarı ama engel değil)
+                const privateKey = localStorage.getItem('privateKey');
+                if (!privateKey) {
+                    const confirmLogin = confirm('⚠️ Private key bulunamadı!\n\nGiriş yaparsanız mesajları çözemezsiniz.\n\nDevam etmek istiyor musunuz?');
+                    if (!confirmLogin) {
+                        return;
+                    }
+                }
+
+                console.log('📤 Giriş isteği gönderiliyor...');
+
+                try {
+                    const response = await fetch('/api/login', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({username: username})
+                    });
+
+                    const data = await response.json();
+
+                    if (response.ok) {
+                        // Bilgileri kaydet
+                        localStorage.setItem('token', data.token);
+                        localStorage.setItem('userId', data.user_id);
+                        localStorage.setItem('username', data.username);
+                        localStorage.setItem('publicKey', data.public_key);
+
+                        console.log('✅ Giriş başarılı');
+
+                        // Private key kontrolü
+                        if (!privateKey) {
+                            alert(`
+⚠️ PRIVATE KEY BULUNAMADI!
+
+Mesajları görebilir ama ÇÖZEMEZSİNİZ!
+Daha önce kayıt olduysanız private key dosyanızı yükleyin.
+
+Yeni kullanıcıysanız önce kayıt olun.
+                            `);
+                            window.location.href = '/register';
+                        } else {
+                            window.location.href = '/chat';
+                        }
+
+                    } else {
+                        messageDiv.className = 'error-message';
+                        messageDiv.textContent = data.error || 'Giriş başarısız!';
+                        messageDiv.style.display = 'block';
+                    }
+
+                } catch (error) {
+                    console.error('❌ Bağlantı hatası:', error);
+                    messageDiv.className = 'error-message';
+                    messageDiv.textContent = 'Sunucuya bağlanılamadı!';
+                    messageDiv.style.display = 'block';
+                }
+            });
+
+        })();
+    </script>
+</body>
+</html>
