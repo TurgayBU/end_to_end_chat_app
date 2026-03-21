@@ -10,23 +10,18 @@ import uuid
 import hashlib
 from config import DB_CONFIG, SECRET_KEY, UPLOAD_FOLDER, SOCKET_IO_SETTINGS
 
-app = Flask(__name__,
-            template_folder='templates',  # templates klasörünü belirt
-            static_folder='static')  # static klasörünü belirt
-
+app = Flask(__name__, template_folder='templates', static_folder='static')
 app.config['SECRET_KEY'] = SECRET_KEY
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100 MB
+app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024
 
 socketio = SocketIO(app, **SOCKET_IO_SETTINGS)
 
-# Upload klasörünü oluştur
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs('templates', exist_ok=True)  # templates klasörünü oluştur
-os.makedirs('static', exist_ok=True)  # static klasörünü oluştur
+os.makedirs('templates', exist_ok=True)
+os.makedirs('static', exist_ok=True)
 
 
-# JWT Token decorator
 def token_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -48,7 +43,6 @@ def token_required(f):
     return decorated
 
 
-# Veritabanı yardımcı fonksiyonları
 def get_db_connection():
     try:
         conn = mysql.connector.connect(**DB_CONFIG)
@@ -62,7 +56,6 @@ def init_database():
     conn = get_db_connection()
     if not conn:
         print("❌ Veritabanına bağlanılamadı!")
-        print("Lütfen MySQL'in çalıştığından emin olun ve config.py'deki DB_CONFIG ayarlarını kontrol edin.")
         return False
 
     cursor = conn.cursor()
@@ -108,26 +101,43 @@ def init_database():
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """)
 
-        # Files tablosu
+        # File Info tablosu (YENİ TASARIM)
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS files (
+            CREATE TABLE IF NOT EXISTS file_info (
                 file_id INT PRIMARY KEY AUTO_INCREMENT,
                 file_uuid VARCHAR(36) UNIQUE NOT NULL,
-                user_id INT NOT NULL,
                 sender_id INT NOT NULL,
-                original_file_name VARCHAR(255) NOT NULL,
-                encrypted_file_path VARCHAR(500) NOT NULL,
-                encrypted_aes_key TEXT NOT NULL,
+                receiver_id INT NOT NULL,
+                file_name VARCHAR(255) NOT NULL,
                 file_size BIGINT NOT NULL,
-                mime_type VARCHAR(100),
-                file_hash VARCHAR(64),
+                encrypted_aes_key TEXT NOT NULL,
+                status ENUM('pending', 'completed', 'failed') DEFAULT 'pending',
+                total_pieces INT NOT NULL,
                 download_count INT DEFAULT 0,
                 last_downloaded_at TIMESTAMP NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+                sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                completed_at TIMESTAMP NULL,
                 FOREIGN KEY (sender_id) REFERENCES users(user_id) ON DELETE CASCADE,
-                INDEX idx_user (user_id),
+                FOREIGN KEY (receiver_id) REFERENCES users(user_id) ON DELETE CASCADE,
+                INDEX idx_sender (sender_id),
+                INDEX idx_receiver (receiver_id),
+                INDEX idx_status (status),
                 INDEX idx_uuid (file_uuid)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """)
+
+        # File Pieces tablosu (YENİ TASARIM)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS file_pieces (
+                piece_id INT PRIMARY KEY AUTO_INCREMENT,
+                file_id INT NOT NULL,
+                piece_number INT NOT NULL,
+                encrypted_piece LONGBLOB NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (file_id) REFERENCES file_info(file_id) ON DELETE CASCADE,
+                UNIQUE KEY unique_piece (file_id, piece_number),
+                INDEX idx_file (file_id),
+                INDEX idx_piece_number (piece_number)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """)
 
@@ -146,12 +156,9 @@ def get_user_by_id(user_id):
     conn = get_db_connection()
     if not conn:
         return None
-
     cursor = conn.cursor(dictionary=True)
-    cursor.execute("""
-        SELECT user_id, username, email, name, surname, public_key 
-        FROM users WHERE user_id = %s
-    """, (user_id,))
+    cursor.execute("SELECT user_id, username, email, name, surname, public_key FROM users WHERE user_id = %s",
+                   (user_id,))
     user = cursor.fetchone()
     cursor.close()
     conn.close()
@@ -162,19 +169,51 @@ def get_user_by_username(username):
     conn = get_db_connection()
     if not conn:
         return None
-
     cursor = conn.cursor(dictionary=True)
-    cursor.execute("""
-        SELECT user_id, username, email, name, surname, public_key 
-        FROM users WHERE username = %s
-    """, (username,))
+    cursor.execute("SELECT user_id, username, email, name, surname, public_key FROM users WHERE username = %s",
+                   (username,))
     user = cursor.fetchone()
     cursor.close()
     conn.close()
     return user
 
 
-# HTML sayfaları
+def update_file_status(file_id):
+    """Parça sayısı kontrol edip status'ü güncelle"""
+    conn = get_db_connection()
+    if not conn:
+        return
+
+    cursor = conn.cursor(dictionary=True)
+
+    # Dosya bilgilerini al
+    cursor.execute("SELECT total_pieces FROM file_info WHERE file_id = %s", (file_id,))
+    file_info = cursor.fetchone()
+
+    if not file_info:
+        cursor.close()
+        conn.close()
+        return
+
+    # Yüklenen parça sayısını bul
+    cursor.execute("SELECT COUNT(*) as piece_count FROM file_pieces WHERE file_id = %s", (file_id,))
+    piece_count = cursor.fetchone()['piece_count']
+
+    # Status'ü güncelle
+    if piece_count >= file_info['total_pieces']:
+        cursor.execute("""
+            UPDATE file_info 
+            SET status = 'completed', completed_at = NOW() 
+            WHERE file_id = %s AND status != 'completed'
+        """, (file_id,))
+        conn.commit()
+        if cursor.rowcount > 0:
+            print(f"✅ Dosya {file_id} tamamlandı ({piece_count}/{file_info['total_pieces']})")
+
+    cursor.close()
+    conn.close()
+
+
 @app.route('/')
 def index_page():
     return render_template('index.html')
@@ -195,11 +234,9 @@ def chat_page():
     return render_template('chat.html')
 
 
-# API endpoints
 @app.route('/api/register', methods=['POST'])
 def register():
     data = request.json
-
     username = data.get('username')
     email = data.get('email')
     name = data.get('name', '')
@@ -209,42 +246,26 @@ def register():
     if not username or not email or not public_key:
         return jsonify({'error': 'Username, email ve public_key zorunludur!'}), 400
 
-    if len(username) < 3 or len(username) > 50:
-        return jsonify({'error': 'Username 3-50 karakter arası olmalıdır!'}), 400
-
     conn = get_db_connection()
     if not conn:
         return jsonify({'error': 'Veritabanı bağlantı hatası!'}), 500
 
     try:
         cursor = conn.cursor()
-
         cursor.execute("SELECT user_id FROM users WHERE username = %s OR email = %s", (username, email))
         if cursor.fetchone():
             return jsonify({'error': 'Bu kullanıcı adı veya email zaten kayıtlı!'}), 400
 
-        query = """
-        INSERT INTO users (username, email, name, surname, public_key)
-        VALUES (%s, %s, %s, %s, %s)
-        """
-        cursor.execute(query, (username, email, name, surname, public_key))
+        cursor.execute("INSERT INTO users (username, email, name, surname, public_key) VALUES (%s, %s, %s, %s, %s)",
+                       (username, email, name, surname, public_key))
         conn.commit()
-
         user_id = cursor.lastrowid
 
-        token = jwt.encode({
-            'user_id': user_id,
-            'username': username,
-            'exp': datetime.datetime.utcnow() + datetime.timedelta(days=30)
-        }, app.config['SECRET_KEY'], algorithm='HS256')
+        token = jwt.encode(
+            {'user_id': user_id, 'username': username, 'exp': datetime.datetime.utcnow() + datetime.timedelta(days=30)},
+            app.config['SECRET_KEY'], algorithm='HS256')
 
-        return jsonify({
-            'message': 'Kayıt başarılı!',
-            'user_id': user_id,
-            'username': username,
-            'token': token
-        }), 201
-
+        return jsonify({'message': 'Kayıt başarılı!', 'user_id': user_id, 'username': username, 'token': token}), 201
     except Error as e:
         return jsonify({'error': f'Veritabanı hatası: {str(e)}'}), 500
     finally:
@@ -256,7 +277,6 @@ def register():
 def login():
     data = request.json
     username = data.get('username')
-
     if not username:
         return jsonify({'error': 'Username gerekli!'}), 400
 
@@ -264,29 +284,12 @@ def login():
     if not user:
         return jsonify({'error': 'Kullanıcı bulunamadı!'}), 404
 
-    conn = get_db_connection()
-    if conn:
-        cursor = conn.cursor()
-        cursor.execute("UPDATE users SET last_login = NOW() WHERE user_id = %s", (user['user_id'],))
-        conn.commit()
-        cursor.close()
-        conn.close()
+    token = jwt.encode({'user_id': user['user_id'], 'username': user['username'],
+                        'exp': datetime.datetime.utcnow() + datetime.timedelta(days=30)},
+                       app.config['SECRET_KEY'], algorithm='HS256')
 
-    token = jwt.encode({
-        'user_id': user['user_id'],
-        'username': user['username'],
-        'exp': datetime.datetime.utcnow() + datetime.timedelta(days=30)
-    }, app.config['SECRET_KEY'], algorithm='HS256')
-
-    return jsonify({
-        'message': 'Giriş başarılı!',
-        'user_id': user['user_id'],
-        'username': user['username'],
-        'name': user['name'],
-        'surname': user['surname'],
-        'public_key': user['public_key'],
-        'token': token
-    })
+    return jsonify({'message': 'Giriş başarılı!', 'user_id': user['user_id'], 'username': user['username'],
+                    'name': user['name'], 'surname': user['surname'], 'public_key': user['public_key'], 'token': token})
 
 
 @app.route('/api/users/search', methods=['GET'])
@@ -294,20 +297,27 @@ def login():
 def search_users(current_user):
     query = request.args.get('q', '')
 
-    if not query or len(query) < 1:
-        return jsonify([])
-
     conn = get_db_connection()
     if not conn:
         return jsonify({'error': 'Veritabanı bağlantı hatası!'}), 500
 
     cursor = conn.cursor(dictionary=True)
-    cursor.execute("""
-        SELECT user_id, username, name, surname 
-        FROM users 
-        WHERE username LIKE %s AND user_id != %s
-        LIMIT 20
-    """, (f'%{query}%', current_user['user_id']))
+
+    if not query:
+        cursor.execute("""
+            SELECT user_id, username, name, surname 
+            FROM users 
+            WHERE user_id != %s
+            ORDER BY username
+            LIMIT 50
+        """, (current_user['user_id'],))
+    else:
+        cursor.execute("""
+            SELECT user_id, username, name, surname 
+            FROM users 
+            WHERE username LIKE %s AND user_id != %s
+            LIMIT 20
+        """, (f'%{query}%', current_user['user_id']))
 
     users = cursor.fetchall()
     cursor.close()
@@ -322,19 +332,9 @@ def get_public_key(current_user, user_id):
     user = get_user_by_id(user_id)
     if not user:
         return jsonify({'error': 'Kullanıcı bulunamadı!'}), 404
+    return jsonify({'user_id': user['user_id'], 'username': user['username'], 'public_key': user['public_key']})
 
-    return jsonify({
-        'user_id': user['user_id'],
-        'username': user['username'],
-        'public_key': user['public_key']
-    })
 
-socketio = SocketIO(app,
-                   cors_allowed_origins="*",
-                   ping_timeout=60,
-                   ping_interval=25,
-                   logger=True,  # Logları aç
-                   engineio_logger=True)
 @app.route('/api/messages/send', methods=['POST'])
 @token_required
 def send_message(current_user):
@@ -345,7 +345,7 @@ def send_message(current_user):
     message_type = data.get('message_type', 'text')
 
     if not all([receiver_id, encrypted_message, encrypted_aes_key]):
-        return jsonify({'error': 'Eksik bilgi! receiver_id, encrypted_message ve encrypted_aes_key gerekli'}), 400
+        return jsonify({'error': 'Eksik bilgi!'}), 400
 
     receiver = get_user_by_id(receiver_id)
     if not receiver:
@@ -357,16 +357,11 @@ def send_message(current_user):
 
     try:
         cursor = conn.cursor()
-
-        query = """
-        INSERT INTO messages 
-        (user_id, sender_id, encrypted_message, encrypted_aes_key, message_type)
-        VALUES (%s, %s, %s, %s, %s)
-        """
-        cursor.execute(query, (receiver_id, current_user['user_id'],
-                               encrypted_message, encrypted_aes_key, message_type))
+        cursor.execute("""
+            INSERT INTO messages (user_id, sender_id, encrypted_message, encrypted_aes_key, message_type)
+            VALUES (%s, %s, %s, %s, %s)
+        """, (receiver_id, current_user['user_id'], encrypted_message, encrypted_aes_key, message_type))
         conn.commit()
-
         message_id = cursor.lastrowid
 
         socketio.emit('new_message', {
@@ -376,11 +371,7 @@ def send_message(current_user):
             'message_type': message_type
         }, room=f"user_{receiver_id}")
 
-        return jsonify({
-            'message': 'Mesaj gönderildi!',
-            'message_id': message_id
-        }), 201
-
+        return jsonify({'message': 'Mesaj gönderildi!', 'message_id': message_id}), 201
     except Error as e:
         return jsonify({'error': f'Veritabanı hatası: {str(e)}'}), 500
     finally:
@@ -396,23 +387,18 @@ def get_messages(current_user):
         return jsonify({'error': 'Veritabanı bağlantı hatası!'}), 500
 
     cursor = conn.cursor(dictionary=True)
-
     cursor.execute("""
-        SELECT m.*, 
-               u1.username as sender_username,
-               u2.username as receiver_username
+        SELECT m.*, u1.username as sender_username, u2.username as receiver_username
         FROM messages m
         JOIN users u1 ON m.sender_id = u1.user_id
         JOIN users u2 ON m.user_id = u2.user_id
         WHERE m.user_id = %s OR m.sender_id = %s
-        ORDER BY m.sent_at DESC
-        LIMIT 100
+        ORDER BY m.sent_at DESC LIMIT 100
     """, (current_user['user_id'], current_user['user_id']))
 
     messages = cursor.fetchall()
     cursor.close()
     conn.close()
-
     return jsonify(messages)
 
 
@@ -424,95 +410,111 @@ def mark_as_read(current_user, message_id):
         return jsonify({'error': 'Veritabanı bağlantı hatası!'}), 500
 
     cursor = conn.cursor()
-    cursor.execute("""
-        UPDATE messages 
-        SET is_read = TRUE, read_at = NOW(), status = 'read'
-        WHERE message_id = %s AND user_id = %s
-    """, (message_id, current_user['user_id']))
+    cursor.execute(
+        "UPDATE messages SET is_read = TRUE, read_at = NOW(), status = 'read' WHERE message_id = %s AND user_id = %s",
+        (message_id, current_user['user_id']))
     conn.commit()
-
     affected = cursor.rowcount
     cursor.close()
     conn.close()
 
     if affected > 0:
-        socketio.emit('message_read', {
-            'message_id': message_id,
-            'reader_id': current_user['user_id']
-        })
+        socketio.emit('message_read', {'message_id': message_id, 'reader_id': current_user['user_id']})
         return jsonify({'message': 'Okundu olarak işaretlendi'})
-    else:
-        return jsonify({'error': 'Mesaj bulunamadı veya size ait değil'}), 404
+    return jsonify({'error': 'Mesaj bulunamadı veya size ait değil'}), 404
 
+
+# ==================== YENİ DOSYA YÜKLEME API'LERİ ====================
 
 @app.route('/api/files/upload', methods=['POST'])
 @token_required
-def upload_file(current_user):
-    receiver_id = request.form.get('receiver_id')
-    encrypted_aes_key = request.form.get('encrypted_aes_key')
-    file = request.files.get('file')
+def upload_file_piece(current_user):
+    """Dosya parçasını yükle"""
 
-    if not all([receiver_id, encrypted_aes_key, file]):
-        return jsonify({'error': 'Eksik bilgi! receiver_id, encrypted_aes_key ve file gerekli'}), 400
+    receiver_id = request.form.get('receiver_id', type=int)
+    encrypted_aes_key = request.form.get('encrypted_aes_key')
+    total_pieces = request.form.get('total_pieces', type=int)
+    current_piece = request.form.get('current_piece', type=int)
+    file_uuid = request.form.get('file_uuid')
+    file_name = request.form.get('file_name')
+    file_size = request.form.get('file_size', type=int)
+    encrypted_piece = request.files.get('piece')
+
+    if not all([receiver_id, encrypted_aes_key, encrypted_piece]):
+        return jsonify({'error': 'Eksik bilgi! receiver_id, encrypted_aes_key ve piece gerekli'}), 400
 
     receiver = get_user_by_id(receiver_id)
     if not receiver:
         return jsonify({'error': 'Alıcı bulunamadı!'}), 404
 
-    file_uuid = str(uuid.uuid4())
-    file_extension = os.path.splitext(file.filename)[1]
-    saved_filename = f"{file_uuid}{file_extension}"
-    file_path = os.path.join(app.config['UPLOAD_FOLDER'], saved_filename)
-
-    file.save(file_path)
-    file_size = os.path.getsize(file_path)
-
-    sha256_hash = hashlib.sha256()
-    with open(file_path, "rb") as f:
-        for byte_block in iter(lambda: f.read(4096), b""):
-            sha256_hash.update(byte_block)
-    file_hash = sha256_hash.hexdigest()
-
     conn = get_db_connection()
     if not conn:
-        os.remove(file_path)
         return jsonify({'error': 'Veritabanı bağlantı hatası!'}), 500
 
     try:
         cursor = conn.cursor()
 
-        query = """
-        INSERT INTO files 
-        (file_uuid, user_id, sender_id, original_file_name, encrypted_file_path, 
-         encrypted_aes_key, file_size, mime_type, file_hash)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """
-        cursor.execute(query, (
-            file_uuid, receiver_id, current_user['user_id'],
-            file.filename, file_path, encrypted_aes_key,
-            file_size, file.mimetype, file_hash
-        ))
+        # İlk parça ise file_info kaydı oluştur
+        if current_piece == 0:
+            file_uuid = str(uuid.uuid4())
+            cursor.execute("""
+                INSERT INTO file_info 
+                (file_uuid, sender_id, receiver_id, file_name, file_size, encrypted_aes_key, total_pieces, status)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, 'pending')
+            """, (
+            file_uuid, current_user['user_id'], receiver_id, file_name, file_size, encrypted_aes_key, total_pieces))
+            conn.commit()
+            file_id = cursor.lastrowid
+            print(f"📁 Yeni dosya kaydı oluşturuldu: ID={file_id}, UUID={file_uuid}, Parça={total_pieces}")
+        else:
+            # File UUID ile file_id bul
+            cursor.execute("SELECT file_id FROM file_info WHERE file_uuid = %s", (file_uuid,))
+            result = cursor.fetchone()
+            if not result:
+                return jsonify({'error': 'Dosya kaydı bulunamadı!'}), 404
+            file_id = result[0]
+
+        # Parçayı kaydet
+        piece_data = encrypted_piece.read()
+        cursor.execute("""
+            INSERT INTO file_pieces (file_id, piece_number, encrypted_piece)
+            VALUES (%s, %s, %s)
+        """, (file_id, current_piece, piece_data))
         conn.commit()
+        print(f"💾 Parça {current_piece + 1}/{total_pieces} kaydedildi - Dosya ID: {file_id}")
 
-        file_id = cursor.lastrowid
+        # Status'ü kontrol et ve güncelle
+        update_file_status(file_id)
 
-        socketio.emit('new_file', {
-            'file_id': file_id,
-            'file_uuid': file_uuid,
-            'sender_id': current_user['user_id'],
-            'sender_username': current_user['username'],
-            'file_name': file.filename,
-            'file_size': file_size
-        }, room=f"user_{receiver_id}")
+        # Dosyanın durumunu kontrol et
+        cursor.execute("SELECT status FROM file_info WHERE file_id = %s", (file_id,))
+        status = cursor.fetchone()[0]
+
+        completed = (status == 'completed')
+
+        # Tüm parçalar tamamlandıysa alıcıya bildirim gönder
+        if completed:
+            cursor.execute("SELECT file_uuid, file_name, file_size FROM file_info WHERE file_id = %s", (file_id,))
+            file_data = cursor.fetchone()
+            socketio.emit('new_file', {
+                'file_uuid': file_data[0],
+                'sender_id': current_user['user_id'],
+                'sender_username': current_user['username'],
+                'file_name': file_data[1],
+                'file_size': file_data[2]
+            }, room=f"user_{receiver_id}")
+            print(f"✅ Dosya tamamlandı ve bildirim gönderildi: {file_data[1]}")
 
         return jsonify({
-            'message': 'Dosya yüklendi!',
-            'file_id': file_id,
-            'file_uuid': file_uuid
+            'message': 'Parça yüklendi!',
+            'file_uuid': file_uuid,
+            'piece': current_piece,
+            'total_pieces': total_pieces,
+            'completed': completed
         }), 201
 
     except Error as e:
-        os.remove(file_path)
+        print(f"❌ Veritabanı hatası: {e}")
         return jsonify({'error': f'Veritabanı hatası: {str(e)}'}), 500
     finally:
         cursor.close()
@@ -527,39 +529,84 @@ def download_file(current_user, file_uuid):
         return jsonify({'error': 'Veritabanı bağlantı hatası!'}), 500
 
     cursor = conn.cursor(dictionary=True)
+
+    # Dosyayı bul (alıcı kontrolü)
     cursor.execute("""
-        SELECT * FROM files 
-        WHERE file_uuid = %s AND user_id = %s
+        SELECT * FROM file_info 
+        WHERE file_uuid = %s AND receiver_id = %s AND status = 'completed'
     """, (file_uuid, current_user['user_id']))
 
     file_info = cursor.fetchone()
+
+    if not file_info:
+        cursor.close()
+        conn.close()
+        return jsonify({'error': 'Dosya bulunamadı!'}), 404
+
+    # Parçaları al
+    cursor.execute("""
+        SELECT encrypted_piece 
+        FROM file_pieces 
+        WHERE file_id = %s 
+        ORDER BY piece_number ASC
+    """, (file_info['file_id'],))
+
+    pieces = cursor.fetchall()
+    cursor.close()
+
+    # Birleştir
+    combined_data = b''
+    for piece in pieces:
+        combined_data += piece['encrypted_piece']
+
+    # İndirme sayısını güncelle
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE file_info 
+        SET download_count = download_count + 1, last_downloaded_at = NOW() 
+        WHERE file_id = %s
+    """, (file_info['file_id'],))
+    conn.commit()
     cursor.close()
     conn.close()
 
-    if not file_info:
-        return jsonify({'error': 'Dosya bulunamadı veya erişim yetkiniz yok!'}), 404
+    from flask import send_file
+    import io
+    return send_file(
+        io.BytesIO(combined_data),
+        download_name=file_info['file_name'],
+        as_attachment=True,
+        mimetype='application/octet-stream'
+    )
+@app.route('/api/files/<file_uuid>/status', methods=['GET'])
+@token_required
+def get_file_status(current_user, file_uuid):
+    """Dosya durumunu kontrol et"""
 
     conn = get_db_connection()
-    if conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            UPDATE files 
-            SET download_count = download_count + 1, last_downloaded_at = NOW()
-            WHERE file_id = %s
-        """, (file_info['file_id'],))
-        conn.commit()
-        cursor.close()
-        conn.close()
+    if not conn:
+        return jsonify({'error': 'Veritabanı bağlantı hatası!'}), 500
 
-    from flask import send_file
-    return send_file(
-        file_info['encrypted_file_path'],
-        download_name=file_info['original_file_name'],
-        as_attachment=True
-    )
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT status, total_pieces, 
+               (SELECT COUNT(*) FROM file_pieces WHERE file_id = file_info.file_id) as uploaded_pieces
+        FROM file_info 
+        WHERE file_uuid = %s AND (sender_id = %s OR receiver_id = %s)
+    """, (file_uuid, current_user['user_id'], current_user['user_id']))
+
+    result = cursor.fetchone()
+    cursor.close()
+    conn.close()
+
+    if not result:
+        return jsonify({'error': 'Dosya bulunamadı!'}), 404
+
+    return jsonify(result)
 
 
-# SocketIO olayları
+# ==================== SOCKET.IO OLAYLARI ====================
+
 @socketio.on('connect')
 def handle_connect():
     print(f"🟢 İstemci bağlandı: {request.sid}")
@@ -572,10 +619,7 @@ def handle_authenticate(data):
         token_data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
         user_id = token_data['user_id']
         username = token_data['username']
-
-        room = f"user_{user_id}"
-        join_room(room)
-
+        join_room(f"user_{user_id}")
         print(f"🔐 Kullanıcı doğrulandı: {username} (ID: {user_id})")
         emit('authenticated', {'status': 'success'})
     except Exception as e:
@@ -588,19 +632,39 @@ def handle_disconnect():
     print(f"🔴 İstemci ayrıldı: {request.sid}")
 
 
+@app.route('/api/files/<file_uuid>/info', methods=['GET'])
+@token_required
+def get_file_info(current_user, file_uuid):
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'error': 'Veritabanı bağlantı hatası!'}), 500
+
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT file_id, file_uuid, file_name, file_size, encrypted_aes_key, status
+        FROM file_info 
+        WHERE file_uuid = %s AND receiver_id = %s
+    """, (file_uuid, current_user['user_id']))
+
+    file_info = cursor.fetchone()
+    cursor.close()
+    conn.close()
+
+    if not file_info:
+        return jsonify({'error': 'Dosya bulunamadı!'}), 404
+
+    return jsonify(file_info)
+# ==================== MAIN ====================
+
 if __name__ == '__main__':
     print("=" * 60)
     print("🔐 GÜVENLİ MESAJLAŞMA SUNUCUSU".center(60))
     print("=" * 60)
 
-    print("\n📦 Veritabanı başlatılıyor...")
     if init_database():
         print("✅ Veritabanı hazır!")
     else:
         print("❌ Veritabanı başlatılamadı!")
-        print("Lütfen MySQL sunucusunun çalıştığından emin olun.")
-        print("MySQL kurulu değilse: brew install mysql")
-        print("MySQL başlat: brew services start mysql")
         exit(1)
 
     import socket
@@ -615,9 +679,5 @@ if __name__ == '__main__':
     print("🌍 Localhost: http://localhost:5001")
     print("\n🚀 Sunucu başlatılıyor...")
     print("-" * 60)
-    print("📢 NOT: Bu sunucu geliştirme amaçlıdır.")
-    print("🔴 Durdurmak için Ctrl+C'ye basın")
-    print("-" * 60)
 
-    # allow_unsafe_werkzeug=True ekledik!
     socketio.run(app, host='0.0.0.0', port=5001, debug=True, allow_unsafe_werkzeug=True)
