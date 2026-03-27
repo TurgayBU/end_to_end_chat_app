@@ -6,7 +6,7 @@ DB_CONFIG = {
     'host': 'localhost',
     'database': 'chatapp',
     'user': 'root',
-    'password': 'Yeni0000',  # Kendi şifrenizle değiştirin
+    'password': '',  # Kendi şifrenizle değiştirin
     'charset': 'utf8mb4',
     'use_unicode': True,
     'autocommit': True

@@ -289,10 +289,7 @@ def login():
         return jsonify({'error': 'Database connection error!'}), 500
 
     cursor = conn.cursor()
-    cursor.execute(
-        "UPDATE users SET is_active = TRUE, last_login = NOW() WHERE user_id = %s",
-        (user['user_id'],)
-    )
+    cursor.execute("UPDATE users SET is_active = TRUE WHERE user_id = %s", (user['user_id'],))
     conn.commit()
 
     token = jwt.encode({'user_id': user['user_id'], 'username': user['username'],
@@ -316,7 +313,7 @@ def search_users(current_user):
 
     if not query:
         cursor.execute("""
-            SELECT user_id, username, name, surname, is_active
+            SELECT user_id, username, name, surname 
             FROM users 
             WHERE user_id != %s
             ORDER BY username
@@ -324,7 +321,7 @@ def search_users(current_user):
         """, (current_user['user_id'],))
     else:
         cursor.execute("""
-            SELECT user_id, username, name, surname, is_active
+            SELECT user_id, username, name, surname 
             FROM users 
             WHERE username LIKE %s AND user_id != %s
             LIMIT 20
@@ -618,10 +615,6 @@ def get_file_status(current_user, file_uuid):
 
 # ==================== SOCKET.IO OLAYLARI ====================
 
-
-# user_id → socket sid маппинг для disconnect
-connected_users = {}
-
 @socketio.on('connect')
 def handle_connect():
     print(f"🟢 İstemci bağlandı: {request.sid}")
@@ -635,7 +628,6 @@ def handle_authenticate(data):
         user_id = token_data['user_id']
         username = token_data['username']
         join_room(f"user_{user_id}")
-        connected_users[request.sid] = user_id
         print(f"🔐 Kullanıcı doğrulandı: {username} (ID: {user_id})")
         emit('authenticated', {'status': 'success'})
     except Exception as e:
@@ -645,41 +637,10 @@ def handle_authenticate(data):
 
 @socketio.on('disconnect')
 def handle_disconnect():
-    sid = request.sid
-    user_id = connected_users.pop(sid, None)
-    if user_id:
-        conn = get_db_connection()
-        if conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE users SET is_active = FALSE WHERE user_id = %s",
-                (user_id,)
-            )
-            conn.commit()
-            cursor.close()
-            conn.close()
-            print(f"🔴 Kullanıcı çevrimdışı: ID={user_id}, SID={sid}")
-    else:
-        print(f"🔴 İstemci ayrıldı: {sid}")
+    print(f"🔴 İstemci ayrıldı: {request.sid}")
 
 
-@app.route('/api/logout', methods=['POST'])
-@token_required
-def logout(current_user):
-    conn = get_db_connection()
-    if conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE users SET is_active = FALSE WHERE user_id = %s",
-            (current_user['user_id'],)
-        )
-        conn.commit()
-        cursor.close()
-        conn.close()
-    return jsonify({'message': 'Çıkış yapıldı!'})
-
-
-
+@app.route('/api/files/<file_uuid>/info', methods=['GET'])
 @token_required
 def get_file_info(current_user, file_uuid):
     conn = get_db_connection()
