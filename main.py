@@ -648,6 +648,117 @@ def handle_disconnect():
     print(f"🔴 İstemci ayrıldı: {request.sid}")
 
 
+# ==================== TCP PERFORMANS SIMÜLASYONU ====================
+
+tcp_connections = {}
+
+
+def init_tcp_connection(user_id):
+    if user_id not in tcp_connections:
+        tcp_connections[user_id] = {
+            'cwnd': 1,
+            'ssthresh': 64,
+            'rtt_sample': [100],
+            'rtt_estimated': 100.0,
+            'rtt_deviation': 0,
+            'packets_sent': 0,
+            'packets_acked': 0,
+            'packets_lost': 0,
+            'retransmissions': 0,
+            'congestion_events': 0
+        }
+    return tcp_connections[user_id]
+
+
+# ==================== TCP PERFORMANS SIMÜLASYONU ====================
+
+tcp_connections = {}
+
+
+def init_tcp_connection(user_id):
+    if user_id not in tcp_connections:
+        tcp_connections[user_id] = {
+            'cwnd': 1,
+            'ssthresh': 64,
+            'rtt_sample': [100],
+            'rtt_estimated': 100.0,
+            'rtt_deviation': 0,
+            'packets_sent': 0,
+            'packets_acked': 0,
+            'packets_lost': 0,
+            'retransmissions': 0,
+            'congestion_events': 0
+        }
+    return tcp_connections[user_id]
+
+
+@app.route('/api/tcp/send-packet', methods=['POST'])
+@admin_required  # Admin token ile erişim
+def tcp_send_packet():
+    import random
+
+    data = request.json
+    receiver_id = data.get('receiver_id')
+    simulate_loss = data.get('simulate_loss', True)
+
+    # Admin için varsayılan sender_id (kendi user_id'nizi yazın)
+    sender_id = 1  # <--- BURAYI KENDİ USER_ID'NİZLE DEĞİŞTİRİN
+
+    # Bağlantıları başlat
+    init_tcp_connection(sender_id)
+    init_tcp_connection(receiver_id)
+
+    sender_tcp = tcp_connections[sender_id]
+
+    # Simüle edilmiş Sample RTT (20-150ms arası)
+    sample_rtt = random.uniform(20, 150)
+
+    # Estimated RTT hesapla (EWMA formülü: α = 0.125)
+    alpha = 0.125
+    old_estimated = sender_tcp['rtt_estimated']
+    estimated_rtt = (1 - alpha) * old_estimated + alpha * sample_rtt
+
+    # RTT deviation hesapla
+    deviation = abs(sample_rtt - estimated_rtt)
+    sender_tcp['rtt_deviation'] = 0.75 * sender_tcp['rtt_deviation'] + 0.25 * deviation
+
+    # Paket kaybı simülasyonu (%5 loss rate)
+    packet_loss = simulate_loss and random.random() < 0.05
+
+    if packet_loss:
+        sender_tcp['ssthresh'] = max(2, sender_tcp['cwnd'] / 2)
+        sender_tcp['cwnd'] = 1
+        sender_tcp['packets_lost'] += 1
+        sender_tcp['retransmissions'] += 1
+        sender_tcp['congestion_events'] += 1
+    else:
+        sender_tcp['packets_acked'] += 1
+        if sender_tcp['cwnd'] < sender_tcp['ssthresh']:
+            sender_tcp['cwnd'] *= 2
+        else:
+            sender_tcp['cwnd'] += 1 / sender_tcp['cwnd']
+        sender_tcp['cwnd'] = min(sender_tcp['cwnd'], 128)
+
+    sender_tcp['packets_sent'] += 1
+    sender_tcp['rtt_estimated'] = estimated_rtt
+    sender_tcp['rtt_sample'].append(sample_rtt)
+    if len(sender_tcp['rtt_sample']) > 10:
+        sender_tcp['rtt_sample'].pop(0)
+
+    loss_rate = (sender_tcp['packets_lost'] / max(1, sender_tcp['packets_sent'])) * 100
+
+    return jsonify({
+        'packet_id': sender_tcp['packets_sent'],
+        'rtt_sample_ms': round(sample_rtt, 2),
+        'rtt_estimated_ms': round(estimated_rtt, 2),
+        'rtt_deviation_ms': round(sender_tcp['rtt_deviation'], 2),
+        'cwnd': round(sender_tcp['cwnd'], 2),
+        'ssthresh': round(sender_tcp['ssthresh'], 2),
+        'packet_loss': packet_loss,
+        'loss_rate': round(loss_rate, 2),
+        'congestion_events': sender_tcp['congestion_events'],
+        'retransmissions': sender_tcp['retransmissions']
+    })
 # ==================== MAIN ====================
 
 if __name__ == '__main__':
