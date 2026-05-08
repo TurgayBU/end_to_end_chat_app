@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, render_template_string
 from flask_socketio import SocketIO, emit, join_room
 import mysql.connector
 from mysql.connector import Error
@@ -8,12 +8,21 @@ from functools import wraps
 import os
 import uuid
 import hashlib
+
+import admin_monitor
+from admin_monitor import admin_bp, ADMIN_SECRET
+from admin_monitor import admin_required, get_db
+
 from config import DB_CONFIG, SECRET_KEY, UPLOAD_FOLDER, SOCKET_IO_SETTINGS
 
+# ÖNCE Flask uygulamasını oluştur
 app = Flask(__name__, template_folder='templates', static_folder='static')
 app.config['SECRET_KEY'] = SECRET_KEY
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024
+
+# SONRA blueprint'i kaydet (app oluşturulduktan sonra)
+app.register_blueprint(admin_bp)
 
 socketio = SocketIO(app, **SOCKET_IO_SETTINGS)
 
@@ -101,7 +110,7 @@ def init_database():
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """)
 
-        # File Info tablosu (YENİ TASARIM)
+        # File Info tablosu
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS file_info (
                 file_id INT PRIMARY KEY AUTO_INCREMENT,
@@ -126,7 +135,7 @@ def init_database():
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """)
 
-        # File Pieces tablosu (YENİ TASARIM)
+        # File Pieces tablosu
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS file_pieces (
                 piece_id INT PRIMARY KEY AUTO_INCREMENT,
@@ -186,7 +195,6 @@ def update_file_status(file_id):
 
     cursor = conn.cursor(dictionary=True)
 
-    # Dosya bilgilerini al
     cursor.execute("SELECT total_pieces FROM file_info WHERE file_id = %s", (file_id,))
     file_info = cursor.fetchone()
 
@@ -195,11 +203,9 @@ def update_file_status(file_id):
         conn.close()
         return
 
-    # Yüklenen parça sayısını bul
     cursor.execute("SELECT COUNT(*) as piece_count FROM file_pieces WHERE file_id = %s", (file_id,))
     piece_count = cursor.fetchone()['piece_count']
 
-    # Status'ü güncelle
     if piece_count >= file_info['total_pieces']:
         cursor.execute("""
             UPDATE file_info 
@@ -424,13 +430,11 @@ def mark_as_read(current_user, message_id):
     return jsonify({'error': 'Mesaj bulunamadı veya size ait değil'}), 404
 
 
-# ==================== YENİ DOSYA YÜKLEME API'LERİ ====================
+# ==================== DOSYA YÜKLEME API'LERİ ====================
 
 @app.route('/api/files/upload', methods=['POST'])
 @token_required
 def upload_file_piece(current_user):
-    """Dosya parçasını yükle"""
-
     receiver_id = request.form.get('receiver_id', type=int)
     encrypted_aes_key = request.form.get('encrypted_aes_key')
     total_pieces = request.form.get('total_pieces', type=int)
@@ -454,7 +458,6 @@ def upload_file_piece(current_user):
     try:
         cursor = conn.cursor()
 
-        # İlk parça ise file_info kaydı oluştur
         if current_piece == 0:
             file_uuid = str(uuid.uuid4())
             cursor.execute("""
@@ -465,34 +468,28 @@ def upload_file_piece(current_user):
             file_uuid, current_user['user_id'], receiver_id, file_name, file_size, encrypted_aes_key, total_pieces))
             conn.commit()
             file_id = cursor.lastrowid
-            print(f"📁 Yeni dosya kaydı oluşturuldu: ID={file_id}, UUID={file_uuid}, Parça={total_pieces}")
+            print(f"📁 Yeni dosya kaydı: ID={file_id}, UUID={file_uuid}")
         else:
-            # File UUID ile file_id bul
             cursor.execute("SELECT file_id FROM file_info WHERE file_uuid = %s", (file_uuid,))
             result = cursor.fetchone()
             if not result:
                 return jsonify({'error': 'Dosya kaydı bulunamadı!'}), 404
             file_id = result[0]
 
-        # Parçayı kaydet
         piece_data = encrypted_piece.read()
         cursor.execute("""
             INSERT INTO file_pieces (file_id, piece_number, encrypted_piece)
             VALUES (%s, %s, %s)
         """, (file_id, current_piece, piece_data))
         conn.commit()
-        print(f"💾 Parça {current_piece + 1}/{total_pieces} kaydedildi - Dosya ID: {file_id}")
+        print(f"💾 Parça {current_piece + 1}/{total_pieces} kaydedildi")
 
-        # Status'ü kontrol et ve güncelle
         update_file_status(file_id)
 
-        # Dosyanın durumunu kontrol et
         cursor.execute("SELECT status FROM file_info WHERE file_id = %s", (file_id,))
         status = cursor.fetchone()[0]
-
         completed = (status == 'completed')
 
-        # Tüm parçalar tamamlandıysa alıcıya bildirim gönder
         if completed:
             cursor.execute("SELECT file_uuid, file_name, file_size FROM file_info WHERE file_id = %s", (file_id,))
             file_data = cursor.fetchone()
@@ -503,7 +500,7 @@ def upload_file_piece(current_user):
                 'file_name': file_data[1],
                 'file_size': file_data[2]
             }, room=f"user_{receiver_id}")
-            print(f"✅ Dosya tamamlandı ve bildirim gönderildi: {file_data[1]}")
+            print(f"✅ Dosya tamamlandı: {file_data[1]}")
 
         return jsonify({
             'message': 'Parça yüklendi!',
@@ -529,8 +526,6 @@ def download_file(current_user, file_uuid):
         return jsonify({'error': 'Veritabanı bağlantı hatası!'}), 500
 
     cursor = conn.cursor(dictionary=True)
-
-    # Dosyayı bul (alıcı kontrolü)
     cursor.execute("""
         SELECT * FROM file_info 
         WHERE file_uuid = %s AND receiver_id = %s AND status = 'completed'
@@ -543,7 +538,6 @@ def download_file(current_user, file_uuid):
         conn.close()
         return jsonify({'error': 'Dosya bulunamadı!'}), 404
 
-    # Parçaları al
     cursor.execute("""
         SELECT encrypted_piece 
         FROM file_pieces 
@@ -554,12 +548,10 @@ def download_file(current_user, file_uuid):
     pieces = cursor.fetchall()
     cursor.close()
 
-    # Birleştir
     combined_data = b''
     for piece in pieces:
         combined_data += piece['encrypted_piece']
 
-    # İndirme sayısını güncelle
     cursor = conn.cursor()
     cursor.execute("""
         UPDATE file_info 
@@ -578,11 +570,11 @@ def download_file(current_user, file_uuid):
         as_attachment=True,
         mimetype='application/octet-stream'
     )
+
+
 @app.route('/api/files/<file_uuid>/status', methods=['GET'])
 @token_required
 def get_file_status(current_user, file_uuid):
-    """Dosya durumunu kontrol et"""
-
     conn = get_db_connection()
     if not conn:
         return jsonify({'error': 'Veritabanı bağlantı hatası!'}), 500
@@ -603,6 +595,30 @@ def get_file_status(current_user, file_uuid):
         return jsonify({'error': 'Dosya bulunamadı!'}), 404
 
     return jsonify(result)
+
+
+@app.route('/api/files/<file_uuid>/info', methods=['GET'])
+@token_required
+def get_file_info(current_user, file_uuid):
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'error': 'Veritabanı bağlantı hatası!'}), 500
+
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT file_id, file_uuid, file_name, file_size, encrypted_aes_key, status
+        FROM file_info 
+        WHERE file_uuid = %s AND receiver_id = %s
+    """, (file_uuid, current_user['user_id']))
+
+    file_info = cursor.fetchone()
+    cursor.close()
+    conn.close()
+
+    if not file_info:
+        return jsonify({'error': 'Dosya bulunamadı!'}), 404
+
+    return jsonify(file_info)
 
 
 # ==================== SOCKET.IO OLAYLARI ====================
@@ -632,28 +648,6 @@ def handle_disconnect():
     print(f"🔴 İstemci ayrıldı: {request.sid}")
 
 
-@app.route('/api/files/<file_uuid>/info', methods=['GET'])
-@token_required
-def get_file_info(current_user, file_uuid):
-    conn = get_db_connection()
-    if not conn:
-        return jsonify({'error': 'Veritabanı bağlantı hatası!'}), 500
-
-    cursor = conn.cursor(dictionary=True)
-    cursor.execute("""
-        SELECT file_id, file_uuid, file_name, file_size, encrypted_aes_key, status
-        FROM file_info 
-        WHERE file_uuid = %s AND receiver_id = %s
-    """, (file_uuid, current_user['user_id']))
-
-    file_info = cursor.fetchone()
-    cursor.close()
-    conn.close()
-
-    if not file_info:
-        return jsonify({'error': 'Dosya bulunamadı!'}), 404
-
-    return jsonify(file_info)
 # ==================== MAIN ====================
 
 if __name__ == '__main__':
@@ -677,6 +671,17 @@ if __name__ == '__main__':
 
     print(f"\n🌐 Yerel ağ adresi: http://{local_ip}:5001")
     print("🌍 Localhost: http://localhost:5001")
+
+    print("\n🔐 ADMIN PANEL KURULUMU:")
+    print("-" * 40)
+    print("1. Admin token oluşturun:")
+    print("   curl -X POST http://localhost:5001/admin/setup \\")
+    print("        -H 'Content-Type: application/json' \\")
+    print("        -d '{\"setup_key\": \"initial_setup_key\"}'")
+    print("\n2. Admin panele erişin:")
+    print("   http://localhost:5001/admin/monitor?admin_token=<TOKEN>")
+    print("=" * 60)
+
     print("\n🚀 Sunucu başlatılıyor...")
     print("-" * 60)
 
