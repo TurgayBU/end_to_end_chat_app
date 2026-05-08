@@ -72,7 +72,7 @@ def init_database():
                 public_key TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_login TIMESTAMP NULL,
-                is_active BOOLEAN DEFAULT TRUE,
+                is_active BOOLEAN DEFAULT FALSE,
                 INDEX idx_username (username),
                 INDEX idx_email (email)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
@@ -283,6 +283,14 @@ def login():
     user = get_user_by_username(username)
     if not user:
         return jsonify({'error': 'Kullanıcı bulunamadı!'}), 404
+
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'error': 'Database connection error!'}), 500
+
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET is_active = TRUE WHERE user_id = %s", (user['user_id'],))
+    conn.commit()
 
     token = jwt.encode({'user_id': user['user_id'], 'username': user['username'],
                         'exp': datetime.datetime.utcnow() + datetime.timedelta(days=30)},

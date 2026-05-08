@@ -1,0 +1,7 @@
+--copy to sql
+mysql -u root -p chatapp < filename.sql
+
+
+-- if DB chatapp not created yet.
+mysql -u root -p -e "CREATE DATABASE chatapp;"
+mysql -u root -p chatapp < filename.sql

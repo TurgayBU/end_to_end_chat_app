@@ -1,0 +1,733 @@
+
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sohbet - Güvenli Mesajlaşma</title>
+    <link rel="stylesheet" type="text/css" href="static/style.css">
+    <link rel="stylesheet"  >
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsencrypt/3.3.2/jsencrypt.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        /* ── Online / Offline indicator ── */
+        .user-avatar {
+            position: relative;
+            display: inline-block;
+        }
+
+        .status-indicator {
+            position: absolute;
+            bottom: -2px;
+            right: -4px;
+            width: 11px;
+            height: 11px;
+            border-radius: 50%;
+            border: 2px solid #fff;
+        }
+
+        .status-indicator.status-online  { background-color: #48bb78; }
+        .status-indicator.status-offline { background-color: #a0aec0; }
+
+        /* label under name */
+        .user-status-label {
+            font-size: 11px;
+            font-weight: 500;
+            margin-top: 2px;
+        }
+
+        .status-online-text  { color: #38a169; }
+        .status-offline-text { color: #a0aec0; }
+
+        /* header status row */
+        .header-status {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 13px;
+        }
+
+        .header-status-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .header-status-dot.online  { background-color: #48bb78; }
+        .header-status-dot.offline { background-color: #a0aec0; }
+
+        .header-online-text  { color: #38a169; font-weight: 600; }
+        .header-offline-text { color: #a0aec0; font-weight: 600; }
+        </style>
+</head>
+<body>
+    <div class="chat-container">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="user-info">
+                <h3>👤 <span id="username"></span></h3>
+                <div class="user-actions">
+                    <button id="backupKeyBtn" class="btn-small" title="Private Key Yedekle">💾</button>
+                    <button id="logoutBtn" class="btn-small">Çıkış</button>
+                </div>
+            </div>
+
+            <div class="search-box">
+                <input type="text" id="searchUser" placeholder="Kullanıcı ara...">
+                <button id="searchBtn">🔍</button>
+            </div>
+
+            <div class="user-list" id="userList">
+                <div class="loading">Kullanıcılar yükleniyor...</div>
+            </div>
+        </div>
+
+        <!-- Main Chat -->
+        <div class="main-chat">
+            <div class="chat-header" id="chatHeader">
+                <h2>💬 Sohbet</h2>
+                <p id="selectedUserInfo">Bir kullanıcı seçin</p>
+            </div>
+
+            <div class="messages" id="messages">
+                <div class="welcome-message">
+                    👋 Hoş geldin! Sol taraftan bir kullanıcı seçerek mesajlaşmaya başlayabilirsin.
+                </div>
+            </div>
+
+            <div class="message-input" id="messageInputArea" style="display: none;">
+                <textarea id="messageText" placeholder="Mesajınızı yazın..." rows="3"></textarea>
+                <div class="input-actions">
+                    <button id="sendBtn" class="btn-primary">📨 Gönder</button>
+                    <button id="fileBtn" class="btn-secondary">📁 Dosya</button>
+                    <input type="file" id="fileInput" style="display: none;">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="notification" class="notification" style="display: none;"></div>
+    <div id="keyWarning" class="key-warning" style="display: none;">
+        ⚠️ Private key bulunamadı! Mesajları çözemezsiniz.
+        <button onclick="window.location.href='/register'">Kayıt Ol</button>
+        <button id="loadKeyBtn">Key Yükle</button>
+    </div>
+<script>
+    (function() {
+        'use strict';
+
+        // Global değişkenler
+        let socket;
+        let currentUser = {
+            id: localStorage.getItem('userId'),
+            username: localStorage.getItem('username'),
+            token: localStorage.getItem('token')
+        };
+
+        let selectedUser = null;
+        let messages = [];
+        let decryptor = null;
+        let messageCheckInterval = null;
+
+        // Elementler
+        const messagesDiv = document.getElementById('messages');
+        const userListDiv = document.getElementById('userList');
+        const chatHeader = document.getElementById('chatHeader');
+        const selectedUserInfo = document.getElementById('selectedUserInfo');
+        const messageInputArea = document.getElementById('messageInputArea');
+        const messageText = document.getElementById('messageText');
+        const sendBtn = document.getElementById('sendBtn');
+        const fileBtn = document.getElementById('fileBtn');
+        const fileInput = document.getElementById('fileInput');
+        const searchInput = document.getElementById('searchUser');
+        const searchBtn = document.getElementById('searchBtn');
+        const backupKeyBtn = document.getElementById('backupKeyBtn');
+        const logoutBtn = document.getElementById('logoutBtn');
+        const notification = document.getElementById('notification');
+        const keyWarning = document.getElementById('keyWarning');
+        const loadKeyBtn = document.getElementById('loadKeyBtn');
+
+        // ========== YARDIMCI FONKSİYONLAR ==========
+        function readFileAsArrayBuffer(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        function showNotification(message, type = 'info') {
+            notification.textContent = message;
+            notification.style.display = 'block';
+            notification.style.backgroundColor = type === 'success' ? '#48bb78' : (type === 'error' ? '#f56565' : '#667eea');
+            setTimeout(() => notification.style.display = 'none', 3000);
+        }
+
+        // ========== DOSYA İNDİRME HAZIRLIK ==========
+        window.prepareDownload = async function(fileUuid, fileName) {
+            try {
+                console.log('🔍 Dosya bilgileri alınıyor:', fileUuid);
+                showNotification('📥 Dosya hazırlanıyor...', 'info');
+
+                const infoResp = await fetch(`/api/files/${fileUuid}/info`, {
+                    headers: { 'Authorization': `Bearer ${currentUser.token}` }
+                });
+
+                if (!infoResp.ok) {
+                    throw new Error('Dosya bilgileri alınamadı');
+                }
+
+                const fileInfo = await infoResp.json();
+                console.log('📁 Dosya bilgisi alındı');
+
+                const fileAesKeyHex = decryptor.decrypt(fileInfo.encrypted_aes_key);
+                console.log('🔑 Dosya AES Key çözüldü');
+
+                if (!fileAesKeyHex || fileAesKeyHex.length !== 64) {
+                    throw new Error('Geçersiz AES key');
+                }
+
+                await downloadFile(fileUuid, fileAesKeyHex, fileName);
+
+            } catch (error) {
+                console.error('❌ Hazırlık hatası:', error);
+                showNotification(`❌ Hata: ${error.message}`, 'error');
+            }
+        };
+
+        // ========== DOSYA İNDİRME ==========
+        window.downloadFile = async function(fileUuid, aesKeyHex, fileName) {
+            try {
+                console.log('📥 Dosya indiriliyor:', fileUuid);
+                showNotification('📥 Dosya indiriliyor...', 'info');
+
+                const response = await fetch(`/api/files/${fileUuid}`, {
+                    headers: { 'Authorization': `Bearer ${currentUser.token}` }
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Dosya indirilemedi');
+                }
+
+                const encryptedText = await response.text();
+                console.log('📦 Şifreli veri uzunluğu:', encryptedText.length);
+
+                const decrypted = CryptoJS.AES.decrypt(encryptedText, aesKeyHex);
+                const decryptedWordArray = decrypted;
+
+                if (!decryptedWordArray.sigBytes || decryptedWordArray.sigBytes <= 0) {
+                    throw new Error('Çözülmüş veri boyutu 0');
+                }
+
+                const arrayBuffer = new ArrayBuffer(decryptedWordArray.sigBytes);
+                const uint8Array = new Uint8Array(arrayBuffer);
+                for (let i = 0; i < decryptedWordArray.sigBytes; i++) {
+                    uint8Array[i] = (decryptedWordArray.words[i >>> 2] >>> (24 - (i % 4) * 8)) & 0xff;
+                }
+
+                let mimeType = 'application/octet-stream';
+                const ext = fileName.split('.').pop().toLowerCase();
+                if (ext === 'txt') mimeType = 'text/plain';
+                else if (ext === 'jpg' || ext === 'jpeg') mimeType = 'image/jpeg';
+                else if (ext === 'png') mimeType = 'image/png';
+                else if (ext === 'pdf') mimeType = 'application/pdf';
+
+                const blob = new Blob([arrayBuffer], { type: mimeType });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = fileName;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+
+                console.log('✅ Dosya indirildi!');
+                showNotification(`✅ ${fileName} indirildi!`, 'success');
+
+            } catch (error) {
+                console.error('❌ İndirme hatası:', error);
+                showNotification(`❌ Hata: ${error.message}`, 'error');
+            }
+        };
+
+        // ========== DOSYA GÖNDERME ==========
+        async function sendFile() {
+            const file = fileInput.files[0];
+            if (!file || !selectedUser) {
+                showNotification('❌ Dosya seçin ve alıcı seçin', 'error');
+                return;
+            }
+
+            if (file.size > 100 * 1024 * 1024) {
+                showNotification('❌ Dosya boyutu 100 MB\'dan küçük olmalıdır', 'error');
+                fileInput.value = '';
+                return;
+            }
+
+            showNotification('📤 Dosya gönderiliyor...', 'info');
+
+            try {
+                const keyResponse = await fetch(`/api/users/${selectedUser.id}/public-key`, {
+                    headers: { 'Authorization': `Bearer ${currentUser.token}` }
+                });
+                if (!keyResponse.ok) throw new Error('Public key alınamadı');
+                const keyData = await keyResponse.json();
+
+                const aesKey = CryptoJS.lib.WordArray.random(32);
+                const aesKeyHex = aesKey.toString(CryptoJS.enc.Hex);
+                console.log('🔑 Dosya AES Key:', aesKeyHex);
+
+                const fileData = await readFileAsArrayBuffer(file);
+                const wordArray = CryptoJS.lib.WordArray.create(fileData);
+                const encryptedFile = CryptoJS.AES.encrypt(wordArray, aesKeyHex).toString();
+
+                const encryptor = new JSEncrypt();
+                encryptor.setPublicKey(keyData.public_key);
+                const encryptedAesKey = encryptor.encrypt(aesKeyHex);
+                if (!encryptedAesKey) throw new Error('AES key şifrelenemedi');
+
+                const formData = new FormData();
+                formData.append('receiver_id', selectedUser.id);
+                formData.append('encrypted_aes_key', encryptedAesKey);
+                formData.append('total_pieces', 1);
+                formData.append('current_piece', 0);
+                formData.append('file_name', file.name);
+                formData.append('file_size', file.size);
+                formData.append('piece', new Blob([encryptedFile], { type: 'application/octet-stream' }), 'piece_0');
+
+                const uploadRes = await fetch('/api/files/upload', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${currentUser.token}` },
+                    body: formData
+                });
+
+                const uploadResult = await uploadRes.json();
+                console.log('📤 Yükleme sonucu:', uploadResult);
+
+                if (uploadResult.completed) {
+                    const msgAesKey = CryptoJS.lib.WordArray.random(32);
+                    const msgAesKeyHex = msgAesKey.toString(CryptoJS.enc.Hex);
+                    const fileInfo = `📁 Dosya gönderildi: ${file.name}\n${uploadResult.file_uuid}`;
+                    const encryptedMessage = CryptoJS.AES.encrypt(fileInfo, msgAesKeyHex).toString();
+
+                    const msgEncryptor = new JSEncrypt();
+                    msgEncryptor.setPublicKey(keyData.public_key);
+                    const msgEncryptedAesKey = msgEncryptor.encrypt(msgAesKeyHex);
+
+                    await fetch('/api/messages/send', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${currentUser.token}`
+                        },
+                        body: JSON.stringify({
+                            receiver_id: selectedUser.id,
+                            encrypted_message: encryptedMessage,
+                            encrypted_aes_key: msgEncryptedAesKey,
+                            message_type: 'file'
+                        })
+                    });
+
+                    showNotification(`✅ Dosya gönderildi: ${file.name}`, 'success');
+                    loadMessages(selectedUser.id);
+                }
+
+                fileInput.value = '';
+
+            } catch (error) {
+                console.error('Dosya gönderme hatası:', error);
+                showNotification(`❌ Hata: ${error.message}`, 'error');
+                fileInput.value = '';
+            }
+        }
+
+        // ========== MESAJ GÖNDERME ==========
+        async function sendMessage() {
+            const text = messageText.value.trim();
+            if (!text || !selectedUser) {
+                showNotification('❌ Mesaj yazın ve alıcı seçin', 'error');
+                return;
+            }
+            if (!decryptor) {
+                showNotification('❌ Private key bulunamadı!', 'error');
+                return;
+            }
+
+            try {
+                const keyResponse = await fetch(`/api/users/${selectedUser.id}/public-key`, {
+                    headers: { 'Authorization': `Bearer ${currentUser.token}` }
+                });
+                if (!keyResponse.ok) throw new Error('Public key alınamadı');
+                const keyData = await keyResponse.json();
+
+                const aesKey = CryptoJS.lib.WordArray.random(32);
+                const aesKeyHex = aesKey.toString(CryptoJS.enc.Hex);
+                const encryptedMessage = CryptoJS.AES.encrypt(text, aesKeyHex).toString();
+
+                const encryptor = new JSEncrypt();
+                encryptor.setPublicKey(keyData.public_key);
+                const encryptedAesKey = encryptor.encrypt(aesKeyHex);
+                if (!encryptedAesKey) throw new Error('AES key şifrelenemedi');
+
+                const response = await fetch('/api/messages/send', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${currentUser.token}`
+                    },
+                    body: JSON.stringify({
+                        receiver_id: selectedUser.id,
+                        encrypted_message: encryptedMessage,
+                        encrypted_aes_key: encryptedAesKey,
+                        message_type: 'text'
+                    })
+                });
+
+                if (response.ok) {
+                    messageText.value = '';
+                    loadMessages(selectedUser.id);
+                } else {
+                    const error = await response.json();
+                    showNotification(`❌ ${error.error || 'Mesaj gönderilemedi'}`, 'error');
+                }
+            } catch (error) {
+                console.error('Mesaj gönderme hatası:', error);
+                showNotification('❌ Mesaj gönderilemedi', 'error');
+            }
+        }
+
+        // ========== MESAJ GÖSTERİMİ ==========
+        function displayMessages(messages) {
+            messagesDiv.innerHTML = '';
+            if (messages.length === 0) {
+                messagesDiv.innerHTML = '<div class="no-messages">📭 Henüz mesaj yok. İlk mesajı sen gönder!</div>';
+                return;
+            }
+
+            messages.sort((a, b) => new Date(a.sent_at) - new Date(b.sent_at));
+
+            messages.forEach(msg => {
+                let displayText = '';
+                let messageClass = '';
+                let senderName = '';
+                let time = new Date(msg.sent_at).toLocaleTimeString('tr-TR', {hour: '2-digit', minute: '2-digit'});
+
+                if (msg.sender_id == currentUser.id) {
+                    messageClass = 'outgoing';
+                    senderName = 'Sen';
+                    displayText = msg.message_type === 'text' ? '📤 [GÖNDERDİĞİN MESAJ]' : '📁 [GÖNDERDİĞİN DOSYA]';
+                } else {
+                    messageClass = 'incoming';
+                    senderName = msg.sender_username || 'Bilinmeyen';
+
+                    if (msg.message_type === 'file') {
+                         if (decryptor && msg.encrypted_aes_key) {
+                            try {
+                                const msgAesKeyHex = decryptor.decrypt(msg.encrypted_aes_key);
+                                if (msgAesKeyHex) {
+                                    const decrypted = CryptoJS.AES.decrypt(msg.encrypted_message, msgAesKeyHex);
+                                    const msgContent = decrypted.toString(CryptoJS.enc.Utf8);
+                                    const lines = msgContent.split('\n');
+                                    if (lines.length >= 2) {
+                                        const fileName = lines[0].replace('📁 Dosya gönderildi: ', '');
+                                        const fileUuid = lines[1].trim();
+
+                                        displayText = `📁 <strong>${fileName}</strong><br>
+                                                       <button class="download-btn" onclick="prepareDownload('${fileUuid}', '${fileName}')">
+                                                       📥 İndir</button>`;
+                                    } else {
+                                        displayText = '📁 [DOSYA]';
+                                    }
+                                } else {
+                                    displayText = '📁 [ŞİFRELİ DOSYA]';
+                                }
+                            } catch (error) {
+                                console.error('Dosya mesajı çözme hatası:', error);
+                                displayText = '📁 [HATALI DOSYA]';
+                            }
+                        } else {
+                            displayText = '📁 [ŞİFRELİ DOSYA]';
+                        }
+                    } else {
+                        if (decryptor && msg.encrypted_aes_key) {
+                            try {
+                                const aesKeyHex = decryptor.decrypt(msg.encrypted_aes_key);
+                                if (aesKeyHex) {
+                                    const decrypted = CryptoJS.AES.decrypt(msg.encrypted_message, aesKeyHex);
+                                    displayText = decrypted.toString(CryptoJS.enc.Utf8);
+                                    if (!displayText) displayText = '❌ [ÇÖZÜLEMEDİ]';
+                                } else {
+                                    displayText = '🔐 [ŞİFRELİ MESAJ]';
+                                }
+                            } catch (error) {
+                                displayText = '❌ [ÇÖZÜLEMEDİ]';
+                            }
+                        } else {
+                            displayText = '🔐 [ŞİFRELİ MESAJ]';
+                        }
+                    }
+                }
+
+                const messageHtml = `
+                    <div class="message ${messageClass}">
+                        <div class="message-header">
+                            <strong>${senderName}</strong>
+                            <span class="message-time">${time}</span>
+                        </div>
+                        <div class="message-body">${displayText}</div>
+                        ${msg.sender_id == currentUser.id ?
+                          `<div class="message-status">${msg.is_read ? '✓✓' : '✓'}</div>` : ''}
+                    </div>
+                `;
+                messagesDiv.innerHTML += messageHtml;
+            });
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        // ========== MESAJLARI YÜKLE ==========
+        async function loadMessages(userId) {
+            try {
+                const response = await fetch('/api/messages', {
+                    headers: {'Authorization': `Bearer ${currentUser.token}`}
+                });
+                if (!response.ok) throw new Error('Mesajlar alınamadı');
+                const allMessages = await response.json();
+                const filteredMessages = allMessages.filter(m =>
+                    (m.sender_id == userId && m.user_id == currentUser.id) ||
+                    (m.sender_id == currentUser.id && m.user_id == userId)
+                );
+                messages = filteredMessages;
+                displayMessages(filteredMessages);
+
+                filteredMessages.forEach(m => {
+                    if (m.user_id == currentUser.id && !m.is_read) {
+                        fetch(`/api/messages/${m.message_id}/read`, {
+                            method: 'POST',
+                            headers: {'Authorization': `Bearer ${currentUser.token}`}
+                        }).catch(err => console.error('Okundu işaretleme hatası:', err));
+                    }
+                });
+            } catch (error) {
+                console.error('Mesaj yükleme hatası:', error);
+                showNotification('❌ Mesajlar yüklenemedi', 'error');
+            }
+        }
+
+        // ========== KULLANICI LİSTESİ ==========
+        async function updateUserList() {
+            const query = searchInput.value;
+            try {
+                const response = await fetch(`/api/users/search?q=${query}`, {
+                    headers: {'Authorization': `Bearer ${currentUser.token}`}
+                });
+                if (!response.ok) throw new Error('Kullanıcı listesi alınamadı');
+                const users = await response.json();
+                if (users.length === 0) {
+                    userListDiv.innerHTML = '<div class="no-users">🔍 Kullanıcı bulunamadı</div>';
+                    return;
+                }
+                userListDiv.innerHTML = users.map(user => {
+                    const isOnline = user.is_active ? true : false;
+                    const userStatusClass = isOnline ? 'status-online' : 'status-offline';
+                    const statusLabel = isOnline ? 'Online' : 'Offline';
+                    const isSelected = selectedUser && selectedUser.id == user.user_id;
+                    return `
+                        <div class="user-item ${isSelected ? 'selected' : ''}"
+                             onclick="selectUser(${user.user_id}, '${user.username}', ${isOnline})">
+                            <div class="user-avatar">
+                                👤
+                                <span class="status-indicator ${userStatusClass}"></span>
+                            </div>
+                            <div class="user-details">
+                                <div class="user-name">${user.username}</div>
+                                <div class="user-fullname">${user.name || ''} ${user.surname || ''}</div>
+                                <div class="user-status-label ${userStatusClass}-text">${statusLabel}</div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (error) {
+                console.error('Kullanıcı listesi hatası:', error);
+                userListDiv.innerHTML = '<div class="no-users">❌ Yüklenemedi</div>';
+            }
+        }
+
+        window.selectUser = function(userId, username, isOnline) {
+            console.log(`👤 Kullanıcı seçildi: ${username} (ID: ${userId})`);
+            selectedUser = {id: userId, username: username, isOnline: isOnline};
+            const statusDot = isOnline
+                ? '<span class="header-status-dot online"></span>'
+                : '<span class="header-status-dot offline"></span>';
+            const statusText = isOnline ? 'Online' : 'Offline';
+            chatHeader.innerHTML = `
+                <h2>💬 ${username}</h2>
+                <p id="selectedUserInfo" class="header-status">
+                    ${statusDot}<span class="${isOnline ? 'header-online-text' : 'header-offline-text'}">${statusText}</span>
+                    &nbsp;·&nbsp; Uçtan uca şifreli sohbet
+                </p>`;
+            messageInputArea.style.display = 'block';
+            updateUserList();
+            loadMessages(userId);
+        };
+
+        // ========== SOCKET.IO ==========
+        function connectSocket() {
+            try {
+                socket = io({
+                    transports: ['websocket', 'polling'],
+                    reconnection: true,
+                    reconnectionAttempts: 10,
+                    reconnectionDelay: 1000
+                });
+
+                socket.on('connect', () => {
+                    console.log('✅ Socket bağlandı');
+                    if (currentUser.token) socket.emit('authenticate', {token: currentUser.token});
+                });
+
+                socket.on('authenticated', (data) => {
+                    if (data.status === 'success') console.log('✅ Socket doğrulandı');
+                });
+
+                socket.on('new_message', (data) => {
+                    console.log('🔔 Yeni mesaj:', data);
+                    showNotification(`📨 ${data.sender_username} yeni mesaj gönderdi`);
+                    if (selectedUser && selectedUser.id == data.sender_id) loadMessages(selectedUser.id);
+                    else updateUserList();
+                });
+
+                socket.on('new_file', (data) => {
+                    console.log('📁 Yeni dosya:', data);
+                    showNotification(`📁 ${data.sender_username} dosya gönderdi`);
+                    if (selectedUser && selectedUser.id == data.sender_id) loadMessages(selectedUser.id);
+                });
+
+            } catch (error) {
+                console.error('Socket hatası:', error);
+            }
+        }
+
+        // ========== PERİYODİK KONTROL ==========
+        function startMessageCheck() {
+            if (messageCheckInterval) clearInterval(messageCheckInterval);
+            messageCheckInterval = setInterval(() => {
+                if (selectedUser) loadMessages(selectedUser.id);
+            }, 5000);
+        }
+
+        // ========== PRIVATE KEY İŞLEMLERİ ==========
+        function backupPrivateKey() {
+            const privateKey = localStorage.getItem('privateKey');
+            if (!privateKey) {
+                showNotification('❌ Yedeklenecek private key bulunamadı', 'error');
+                return;
+            }
+            const blob = new Blob([privateKey], {type: 'text/plain'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `private_key_${currentUser.username}_${new Date().toISOString().slice(0,10)}.pem`;
+            a.click();
+            URL.revokeObjectURL(url);
+            showNotification('✅ Private key yedeklendi', 'success');
+        }
+
+        function loadPrivateKey() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.pem,.txt,.key';
+            input.onchange = function(e) {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const privateKey = e.target.result;
+                    try {
+                        const testDecryptor = new JSEncrypt();
+                        testDecryptor.setPrivateKey(privateKey);
+                        const test = testDecryptor.decrypt(testDecryptor.encrypt('test'));
+                        if (test !== 'test') throw new Error('Geçersiz private key');
+                        localStorage.setItem('privateKey', privateKey);
+                        decryptor = testDecryptor;
+                        keyWarning.style.display = 'none';
+                        showNotification('✅ Private key yüklendi', 'success');
+                        if (selectedUser) loadMessages(selectedUser.id);
+                    } catch (error) {
+                        showNotification('❌ Geçersiz private key', 'error');
+                    }
+                };
+                reader.readAsText(file);
+            };
+            input.click();
+        }
+
+        function logout() {
+            if (messageCheckInterval) clearInterval(messageCheckInterval);
+            if (socket) socket.disconnect();
+            localStorage.clear();
+            window.location.href = '/';
+        }
+
+        // ========== BAŞLANGIÇ ==========
+        function init() {
+            console.log('🚀 Chat başlatılıyor...');
+
+            if (!currentUser.token || !currentUser.id || !currentUser.username) {
+                window.location.href = '/login';
+                return;
+            }
+
+            document.getElementById('username').textContent = currentUser.username;
+
+            const privateKey = localStorage.getItem('privateKey');
+            if (!privateKey) {
+                keyWarning.style.display = 'block';
+            } else {
+                try {
+                    decryptor = new JSEncrypt();
+                    decryptor.setPrivateKey(privateKey);
+                    const test = decryptor.decrypt(decryptor.encrypt('test'));
+                    if (test === 'test') {
+                        console.log('✅ Private key doğrulandı');
+                        keyWarning.style.display = 'none';
+                    } else {
+                        throw new Error('Doğrulama başarısız');
+                    }
+                } catch (error) {
+                    localStorage.removeItem('privateKey');
+                    keyWarning.style.display = 'block';
+                }
+            }
+
+            connectSocket();
+            startMessageCheck();
+            updateUserList();
+
+            searchBtn.addEventListener('click', updateUserList);
+            searchInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') updateUserList(); });
+            sendBtn.addEventListener('click', sendMessage);
+            messageText.addEventListener('keypress', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
+            fileBtn.addEventListener('click', () => fileInput.click());
+            fileInput.addEventListener('change', sendFile);
+            backupKeyBtn.addEventListener('click', backupPrivateKey);
+            loadKeyBtn.addEventListener('click', loadPrivateKey);
+            logoutBtn.addEventListener('click', logout);
+        }
+
+        init();
+    })();
+</script>
+</body>
+</html>
