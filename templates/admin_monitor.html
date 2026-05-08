@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Secure Messaging — Admin Monitor</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#060a12;--s1:#0d1424;--s2:#111d33;--s3:#172240;
+  --border:rgba(56,189,248,0.12);--border2:rgba(56,189,248,0.25);
+  --blue:#38bdf8;--green:#34d399;--pink:#f472b6;--amber:#fbbf24;
+  --purple:#a78bfa;--red:#f87171;--text:#e2e8f0;--muted:#64748b;
+  --mono:'JetBrains Mono',monospace;--sans:'Space Grotesk',sans-serif;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh;overflow-x:hidden}
+body::after{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.03) 2px,rgba(0,0,0,0.03) 4px);pointer-events:none;z-index:1000}
+
+/* ── HEADER ── */
+header{display:flex;align-items:center;justify-content:space-between;padding:12px 20px;border-bottom:1px solid var(--border);background:rgba(13,20,36,0.95);backdrop-filter:blur(8px);position:sticky;top:0;z-index:200}
+.logo{display:flex;align-items:center;gap:10px}
+.logo-icon{width:30px;height:30px;border:1.5px solid var(--pink);border-radius:6px;display:flex;align-items:center;justify-content:center}
+.logo-icon svg{width:15px;height:15px;stroke:var(--pink);fill:none;stroke-width:2}
+.logo-text{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--pink);letter-spacing:0.08em}
+.logo-sub{font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:0.1em}
+.header-right{display:flex;gap:8px;align-items:center}
+.pill{display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:10px;color:var(--muted);padding:3px 9px;border:1px solid var(--border);border-radius:20px}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--green);animation:blink 1.5s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0.3}}
+.admin-badge{background:rgba(244,114,182,0.12);border:1px solid rgba(244,114,182,0.3);color:var(--pink);font-family:var(--mono);font-size:10px;padding:3px 10px;border-radius:20px}
+.refresh-btn{padding:4px 12px;background:transparent;border:1px solid var(--border2);border-radius:5px;color:var(--blue);font-family:var(--mono);font-size:10px;cursor:pointer;transition:all .15s}
+.refresh-btn:hover{background:rgba(56,189,248,0.1)}
+
+/* ── LAYOUT ── */
+.app{display:flex;height:calc(100vh - 53px)}
+
+/* ── LEFT: conv list ── */
+.left-panel{width:260px;border-right:1px solid var(--border);background:var(--s1);display:flex;flex-direction:column;flex-shrink:0}
+.panel-header{padding:13px 14px 10px;border-bottom:1px solid var(--border)}
+.ph-title{font-family:var(--mono);font-size:9px;font-weight:600;color:var(--muted);letter-spacing:0.15em;text-transform:uppercase;margin-bottom:4px}
+.ph-sub{font-size:11px;color:var(--muted)}
+.conv-list{flex:1;overflow-y:auto;padding:6px}
+.conv-list::-webkit-scrollbar{width:3px}
+.conv-list::-webkit-scrollbar-thumb{background:var(--border2)}
+.conv-item{padding:10px 11px;border-radius:6px;border:1px solid transparent;cursor:pointer;margin-bottom:3px;transition:all .15s}
+.conv-item:hover{background:var(--s2);border-color:var(--border)}
+.conv-item.active{background:var(--s3);border-color:var(--border2)}
+.ci-name{font-size:13px;font-weight:500;margin-bottom:3px}
+.ci-meta{display:flex;justify-content:space-between;align-items:center;margin-top:3px}
+.ci-count{font-family:var(--mono);font-size:9px;background:rgba(56,189,248,0.1);color:var(--blue);padding:1px 6px;border-radius:10px}
+.ci-time{font-family:var(--mono);font-size:9px;color:var(--muted)}
+
+/* stats cards on top */
+.stats-strip{padding:10px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:1fr 1fr;gap:5px}
+.sc{background:var(--s2);border:1px solid var(--border);border-radius:5px;padding:7px 9px}
+.sc-label{font-family:var(--mono);font-size:8px;color:var(--muted);letter-spacing:0.08em;margin-bottom:2px}
+.sc-val{font-family:var(--mono);font-size:15px;font-weight:700;color:var(--blue)}
+.sc-val.g{color:var(--green)}.sc-val.p{color:var(--pink)}.sc-val.a{color:var(--amber)}
+
+/* ── MIDDLE: messages ── */
+.mid-panel{flex:1;display:flex;flex-direction:column;border-right:1px solid var(--border)}
+.mid-header{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.mh-info h3{font-size:14px;font-weight:500}
+.mh-info p{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:2px}
+.mh-badges{display:flex;gap:6px}
+.badge{font-family:var(--mono);font-size:9px;padding:2px 8px;border-radius:3px}
+.badge-green{color:var(--green);border:1px solid rgba(52,211,153,0.2)}
+.badge-pink{color:var(--pink);border:1px solid rgba(244,114,182,0.2);background:rgba(244,114,182,0.04)}
+
+.msgs-area{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:9px}
+.msgs-area::-webkit-scrollbar{width:3px}
+.msgs-area::-webkit-scrollbar-thumb{background:var(--border2)}
+.msg-wrap{display:flex;flex-direction:column}
+.msg-wrap.out{align-items:flex-end}
+.msg-wrap.in{align-items:flex-start}
+.bubble{max-width:70%;padding:9px 13px;border-radius:8px;font-size:13px;line-height:1.5}
+.bubble.out{background:var(--s3);border:1px solid rgba(56,189,248,0.2)}
+.bubble.in{background:var(--s2);border:1px solid rgba(168,139,250,0.2)}
+.bubble-enc{font-family:var(--mono);font-size:9px;color:var(--amber);background:rgba(251,191,36,0.05);border-radius:3px;padding:2px 6px;margin-top:4px;word-break:break-all;max-height:28px;overflow:hidden}
+.bubble-meta{font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:3px;display:flex;align-items:center;gap:7px}
+.analyze-btn{font-family:var(--mono);font-size:9px;color:var(--amber);border:1px solid rgba(251,191,36,0.2);background:rgba(251,191,36,0.04);padding:1px 7px;border-radius:3px;cursor:pointer;transition:all .15s}
+.analyze-btn:hover{background:rgba(251,191,36,0.1);border-color:rgba(251,191,36,0.4)}
+.analyze-btn.active{color:var(--blue);border-color:rgba(56,189,248,0.4);background:rgba(56,189,248,0.07)}
+
+/* ── RIGHT: crypto terminal ── */
+.right-panel{width:370px;display:flex;flex-direction:column;background:var(--bg);flex-shrink:0;transition:all .3s}
+.right-panel.collapsed{width:0;overflow:hidden}
+.rp-header{padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.rp-title{font-family:var(--mono);font-size:10px;font-weight:600;color:var(--muted);letter-spacing:0.12em;text-transform:uppercase;display:flex;align-items:center;gap:7px}
+.rp-title::before{content:'';width:3px;height:10px;background:var(--pink);border-radius:2px}
+.rp-body{flex:1;overflow-y:auto;padding:11px;display:flex;flex-direction:column;gap:8px}
+.rp-body::-webkit-scrollbar{width:3px}
+.rp-body::-webkit-scrollbar-thumb{background:var(--border2)}
+.rp-placeholder{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:10px;color:var(--muted)}
+.rp-placeholder svg{width:34px;height:34px;stroke:var(--muted);fill:none;stroke-width:1.5;opacity:.4}
+.rp-placeholder p{font-family:var(--mono);font-size:10px;text-align:center;line-height:1.6;opacity:.5}
+
+/* section */
+.sec{background:var(--s1);border:1px solid var(--border);border-radius:6px;padding:10px}
+.sec-title{font-family:var(--mono);font-size:9px;font-weight:600;color:var(--muted);letter-spacing:0.12em;text-transform:uppercase;margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.sec-title .ind{width:6px;height:6px;border-radius:50%}
+.ind-b{background:var(--blue)}.ind-g{background:var(--green)}.ind-a{background:var(--amber)}.ind-p{background:var(--purple)}.ind-pk{background:var(--pink)}
+
+/* flow */
+.flow-steps{display:flex;flex-direction:column;gap:4px}
+.flow-step{display:flex;align-items:flex-start;gap:7px;padding:6px 8px;border-radius:4px;border:1px solid var(--border);background:var(--s2);transition:all .25s;opacity:.35}
+.flow-step.active{opacity:1;border-color:var(--blue)}
+.flow-step.done{opacity:.75;border-color:rgba(52,211,153,0.25)}
+.sn{font-family:var(--mono);font-size:9px;font-weight:700;width:17px;height:17px;border-radius:3px;background:var(--s3);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--muted)}
+.flow-step.active .sn{background:var(--blue);color:#000}
+.flow-step.done .sn{background:var(--green);color:#000}
+.sl{font-size:11px;font-weight:500;margin-bottom:2px}
+.sv{font-family:var(--mono);font-size:9px;color:var(--muted);word-break:break-all;line-height:1.4}
+.flow-step.active .sv{color:var(--blue)}
+.flow-step.done .sv{color:var(--green)}
+
+/* key display */
+.kd{background:var(--s2);border:1px solid var(--border);border-radius:4px;padding:7px;margin-bottom:5px}
+.kl{font-family:var(--mono);font-size:8px;color:var(--muted);margin-bottom:3px;letter-spacing:.08em}
+.kv{font-family:var(--mono);font-size:9px;color:var(--amber);word-break:break-all;line-height:1.5}
+.kv.bl{color:var(--blue)}.kv.gn{color:var(--green)}.kv.pp{color:var(--purple)}
+
+/* matrix */
+.mat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:2px;margin-bottom:6px}
+.mc{background:var(--s2);border:1px solid var(--border);border-radius:3px;font-family:var(--mono);font-size:10px;text-align:center;padding:5px 2px;color:var(--muted);transition:all .25s}
+.mc.hl{background:var(--s3);border-color:var(--blue);color:var(--blue)}
+.mc.ch{background:rgba(52,211,153,.08);border-color:var(--green);color:var(--green)}
+
+/* round pips */
+.rpbar{display:flex;gap:2px;margin-bottom:6px;flex-wrap:wrap}
+.rp{width:20px;height:5px;border-radius:2px;background:var(--s2);border:1px solid var(--border);transition:all .2s}
+.rp.done{background:var(--green);border-color:var(--green)}
+.rp.active{background:var(--blue);border-color:var(--blue);animation:rpulse .5s ease-in-out}
+@keyframes rpulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+/* sbox */
+.sbgrid{display:grid;grid-template-columns:repeat(16,1fr);gap:1px;margin-top:5px}
+.sbc{font-family:var(--mono);font-size:7px;text-align:center;padding:2px 0;border-radius:1px;color:var(--muted);background:var(--s1);transition:all .12s}
+.sbc.lit{background:rgba(56,189,248,.12);color:var(--blue)}
+
+/* stats mini */
+.stats-row{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:7px}
+.sm{background:var(--s2);border:1px solid var(--border);border-radius:4px;padding:6px 8px}
+.sml{font-family:var(--mono);font-size:8px;color:var(--muted);letter-spacing:.08em;margin-bottom:2px}
+.smv{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--blue)}
+.smv.g{color:var(--green)}.smv.p{color:var(--pink)}.smv.a{color:var(--amber)}
+
+/* log */
+.log-area{height:100px;overflow-y:auto;background:var(--s2);border:1px solid var(--border);border-radius:4px;padding:7px}
+.log-area::-webkit-scrollbar{width:2px}
+.log-area::-webkit-scrollbar-thumb{background:var(--border2)}
+.le{font-family:var(--mono);font-size:9px;line-height:1.7;display:flex;gap:5px}
+.lt{color:var(--muted);flex-shrink:0}
+.lm.info{color:var(--blue)}.lm.success{color:var(--green)}.lm.warn{color:var(--amber)}.lm.error{color:var(--red)}
+
+/* chart */
+.mini-chart{height:65px;position:relative}
+
+/* banner */
+.sel-banner{padding:7px 10px;background:rgba(251,191,36,.06);border-bottom:1px solid rgba(251,191,36,.15);font-family:var(--mono);font-size:9px;color:var(--amber);flex-shrink:0}
+
+/* empty states */
+.empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:8px;color:var(--muted)}
+.empty-state svg{width:36px;height:36px;stroke:currentColor;fill:none;stroke-width:1.5;opacity:.4}
+.empty-state p{font-family:var(--mono);font-size:11px;opacity:.5;text-align:center}
+
+/* live indicator */
+.live-dot{width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block;animation:blink 1.5s infinite;margin-right:4px}
+
+/* toggle terminal btn */
+.toggle-term{padding:4px 12px;background:transparent;border:1px solid rgba(244,114,182,.3);border-radius:5px;color:var(--pink);font-family:var(--mono);font-size:10px;cursor:pointer;transition:all .15s}
+.toggle-term:hover{background:rgba(244,114,182,.1)}
+</style>
+</head>
+<body>
+<div class="root" style="display:flex;flex-direction:column;min-height:100vh">
+
+<!-- HEADER -->
+<header>
+  <div class="logo">
+    <div class="logo-icon"><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
+    <div>
+      <div class="logo-text">ADMIN CRYPTO MONITOR</div>
+      <div class="logo-sub">REAL-TIME · AES-256 + RSA-2048 · SERVER-SIDE VIEW</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <span class="admin-badge">ADMIN ONLY</span>
+    <div class="pill"><span class="live-dot"></span>LIVE</div>
+    <div class="pill" id="hdr-users">-- users</div>
+    <div class="pill" id="hdr-msgs">-- messages</div>
+    <button class="refresh-btn" onclick="refreshAll()">↻ REFRESH</button>
+    <button class="toggle-term" onclick="toggleTerminal()">⊞ TERMINAL</button>
+  </div>
+</header>
+
+<!-- APP -->
+<div class="app">
+
+  <!-- LEFT: Conversations -->
+  <div class="left-panel">
+    <div class="stats-strip" id="stats-strip">
+      <div class="sc"><div class="sc-label">TOTAL USERS</div><div class="sc-val" id="stat-users">--</div></div>
+      <div class="sc"><div class="sc-label">TOTAL MSGS</div><div class="sc-val g" id="stat-msgs">--</div></div>
+      <div class="sc"><div class="sc-label">TODAY</div><div class="sc-val a" id="stat-today">--</div></div>
+      <div class="sc"><div class="sc-label">FILES</div><div class="sc-val p" id="stat-files">--</div></div>
+    </div>
+    <div class="panel-header">
+      <div class="ph-title">// conversations</div>
+      <div class="ph-sub">Click to monitor</div>
+    </div>
+    <div class="conv-list" id="conv-list">
+      <div class="empty-state" style="height:200px">
+        <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <p>Loading conversations...</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- MIDDLE: Messages -->
+  <div class="mid-panel">
+    <div class="mid-header">
+      <div class="mh-info">
+        <h3 id="mid-title">Select a conversation</h3>
+        <p id="mid-sub">Choose from the left panel to view messages</p>
+      </div>
+      <div class="mh-badges">
+        <span class="badge badge-green">AES-256 + RSA-2048</span>
+        <span class="badge badge-pink">ADMIN VIEW</span>
+      </div>
+    </div>
+    <div class="msgs-area" id="msgs-area">
+      <div class="empty-state">
+        <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <p>Select a conversation to<br>view encrypted messages</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: Crypto Terminal -->
+  <div class="right-panel" id="right-panel">
+    <div class="rp-header">
+      <div class="rp-title">// crypto terminal</div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <span style="font-family:var(--mono);font-size:8px;color:var(--pink);border:1px solid rgba(244,114,182,.2);padding:1px 6px;border-radius:3px">ADMIN ONLY</span>
+        <span id="analyzing-ind" style="font-family:var(--mono);font-size:9px;color:var(--blue);display:none">analyzing...</span>
+      </div>
+    </div>
+
+    <!-- placeholder -->
+    <div class="rp-placeholder" id="rp-placeholder">
+      <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      <p>Click ⊙ ANALYZE on any<br>message bubble to inspect<br>its crypto details here</p>
+    </div>
+
+    <!-- content -->
+    <div id="rp-content" style="display:none;flex-direction:column;gap:8px;padding:11px;overflow-y:auto;flex:1">
+
+      <div class="sel-banner" id="sel-banner">Analyzing: —</div>
+
+      <!-- Live metrics -->
+      <div class="sec">
+        <div class="sec-title"><span class="ind ind-b"></span>LIVE SESSION METRICS</div>
+        <div class="stats-row">
+          <div class="sm"><div class="sml">ANALYZED</div><div class="smv" id="s-analyzed">0</div></div>
+          <div class="sm"><div class="sml">AES BLOCKS</div><div class="smv g" id="s-blocks">0</div></div>
+          <div class="sm"><div class="sml">ROUNDS</div><div class="smv p" id="s-rounds">0</div></div>
+          <div class="sm"><div class="sml">LAST TIME</div><div class="smv a" id="s-time">0ms</div></div>
+        </div>
+        <div class="mini-chart"><canvas id="rttChart" role="img" aria-label="Analysis time chart"></canvas></div>
+      </div>
+
+      <!-- Message crypto details -->
+      <div class="sec">
+        <div class="sec-title"><span class="ind ind-a"></span>MESSAGE CRYPTO DETAILS</div>
+        <div class="kd"><div class="kl">SENDER PUBLIC KEY (from DB)</div><div class="kv bl" id="kv-sender-pub">—</div></div>
+        <div class="kd"><div class="kl">RECEIVER PUBLIC KEY (from DB)</div><div class="kv bl" id="kv-recv-pub">—</div></div>
+        <div class="kd"><div class="kl">ENCRYPTED AES KEY (RSA-wrapped, Base64)</div><div class="kv pp" id="kv-enc-aes">—</div></div>
+        <div class="kd"><div class="kl">ENCRYPTED MESSAGE PREVIEW (Base64/CipherText)</div><div class="kv" id="kv-enc-msg">—</div></div>
+        <div class="kd"><div class="kl">MESSAGE SIZE</div><div class="kv gn" id="kv-sizes">—</div></div>
+      </div>
+
+      <!-- Encryption flow (simulated from DB metadata) -->
+      <div class="sec">
+        <div class="sec-title"><span class="ind ind-b"></span>ENCRYPTION FLOW (RECONSTRUCTED)</div>
+        <div class="flow-steps" id="flow-steps">
+          <div class="flow-step" id="step-0"><div class="sn">1</div><div><div class="sl">RSA public key → AES-256 key wrap</div><div class="sv" id="sv-0">Receiver's RSA pub key used to wrap AES key</div></div></div>
+          <div class="flow-step" id="step-1"><div class="sn">2</div><div><div class="sl">Key Expansion (Nk=8, Nr=14)</div><div class="sv" id="sv-1">15 round keys derived</div></div></div>
+          <div class="flow-step" id="step-2"><div class="sn">3</div><div><div class="sl">PKCS#7 Padding + Block split</div><div class="sv" id="sv-2">Plaintext padded to 16-byte blocks</div></div></div>
+          <div class="flow-step" id="step-3"><div class="sn">4</div><div><div class="sl">AddRoundKey → SubBytes → ShiftRows → MixCols</div><div class="sv" id="sv-3">14-round AES-256 CBC encryption</div></div></div>
+          <div class="flow-step" id="step-4"><div class="sn">5</div><div><div class="sl">Encrypted AES key → RSA wrap (c = m^e mod n)</div><div class="sv" id="sv-4">AES key protected with receiver RSA public key</div></div></div>
+          <div class="flow-step" id="step-5"><div class="sn">6</div><div><div class="sl">Base64 encode → DB store</div><div class="sv" id="sv-5">Stored in messages.encrypted_message</div></div></div>
+        </div>
+      </div>
+
+      <!-- AES State Matrix (simulated from enc preview) -->
+      <div class="sec">
+        <div class="sec-title"><span class="ind ind-g"></span>AES STATE MATRIX (4×4) — RECONSTRUCTED</div>
+        <div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-bottom:5px">ROUND PROGRESS (<span id="round-num">0</span>/14)</div>
+        <div class="rpbar" id="rounds-bar"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div>
+            <div style="font-family:var(--mono);font-size:8px;color:var(--muted);margin-bottom:3px">INPUT BLOCK (hex)</div>
+            <div class="mat-grid" id="mat-before"></div>
+          </div>
+          <div>
+            <div style="font-family:var(--mono);font-size:8px;color:var(--muted);margin-bottom:3px">OUTPUT BLOCK (encrypted)</div>
+            <div class="mat-grid" id="mat-after"></div>
+          </div>
+        </div>
+        <div style="font-family:var(--mono);font-size:8px;color:var(--muted);margin-top:5px">S-BOX LOOKUP TABLE (active bytes highlighted)</div>
+        <div class="sbgrid" id="sbox-grid"></div>
+      </div>
+
+      <!-- RSA key details -->
+      <div class="sec">
+        <div class="sec-title"><span class="ind ind-p"></span>RSA KEY METADATA (from DB)</div>
+        <div class="kd"><div class="kl">KEY FORMAT</div><div class="kv bl" id="kv-key-format">—</div></div>
+        <div class="kd"><div class="kl">PUBLIC KEY SIZE (bits, estimated)</div><div class="kv gn" id="kv-key-bits">—</div></div>
+        <div class="kd"><div class="kl">ENCRYPTION ALGORITHM</div><div class="kv" style="color:var(--purple)">RSA-OAEP / PKCS#1 v1.5 + AES-256-CBC hybrid</div></div>
+      </div>
+
+      <!-- Decrypt flow -->
+      <div class="sec">
+        <div class="sec-title"><span class="ind ind-pk"></span>DECRYPT FLOW (RECEIVER SIDE)</div>
+        <div class="flow-steps" id="dec-steps">
+          <div class="flow-step" id="dstep-0"><div class="sn">1</div><div><div class="sl">RSA private key → unwrap AES key (m = c^d mod n)</div><div class="sv" id="dsv-0">Waiting...</div></div></div>
+          <div class="flow-step" id="dstep-1"><div class="sn">2</div><div><div class="sl">Key Expansion → 15 round keys</div><div class="sv" id="dsv-1">Waiting...</div></div></div>
+          <div class="flow-step" id="dstep-2"><div class="sn">3</div><div><div class="sl">InvShiftRows → InvSubBytes → InvMixColumns</div><div class="sv" id="dsv-2">Waiting...</div></div></div>
+          <div class="flow-step" id="dstep-3"><div class="sn">4</div><div><div class="sl">Remove PKCS#7 padding → plaintext</div><div class="sv" id="dsv-3">Waiting...</div></div></div>
+        </div>
+      </div>
+
+      <!-- System log -->
+      <div class="sec">
+        <div class="sec-title"><span class="ind ind-pk"></span>ADMIN SESSION LOG</div>
+        <div class="log-area" id="log-area"></div>
+      </div>
+
+    </div><!-- /rp-content -->
+  </div><!-- /right-panel -->
+
+</div><!-- /app -->
+</div><!-- /root -->
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+// ─── CONFIG ───────────────────────────────────────────────────────────────────
+const ADMIN_TOKEN = '{{ admin_token }}';
+const API = (path) => path + (path.includes('?') ? '&' : '?') + 'admin_token=' + encodeURIComponent(ADMIN_TOKEN);
+
+// ─── STATE ────────────────────────────────────────────────────────────────────
+let activePair = null;   // { user_a_id, user_b_id, user_a_name, user_b_name }
+let allMessages = [];
+let sessionStats = { analyzed: 0, blocks: 0, rounds: 0, lastMs: 0 };
+let rttChart;
+let activeAnalyzeId = null;
+let terminalVisible = true;
+
+// ─── AES S-BOX (for visual simulation) ───────────────────────────────────────
+const S_BOX=[0x63,0x7c,0x77,0x7b,0xf2,0x6b,0x6f,0xc5,0x30,0x01,0x67,0x2b,0xfe,0xd7,0xab,0x76,0xca,0x82,0xc9,0x7d,0xfa,0x59,0x47,0xf0,0xad,0xd4,0xa2,0xaf,0x9c,0xa4,0x72,0xc0,0xb7,0xfd,0x93,0x26,0x36,0x3f,0xf7,0xcc,0x34,0xa5,0xe5,0xf1,0x71,0xd8,0x31,0x15,0x04,0xc7,0x23,0xc3,0x18,0x96,0x05,0x9a,0x07,0x12,0x80,0xe2,0xeb,0x27,0xb2,0x75,0x09,0x83,0x2c,0x1a,0x1b,0x6e,0x5a,0xa0,0x52,0x3b,0xd6,0xb3,0x29,0xe3,0x2f,0x84,0x53,0xd1,0x00,0xed,0x20,0xfc,0xb1,0x5b,0x6a,0xcb,0xbe,0x39,0x4a,0x4c,0x58,0xcf,0xd0,0xef,0xaa,0xfb,0x43,0x4d,0x33,0x85,0x45,0xf9,0x02,0x7f,0x50,0x3c,0x9f,0xa8,0x51,0xa3,0x40,0x8f,0x92,0x9d,0x38,0xf5,0xbc,0xb6,0xda,0x21,0x10,0xff,0xf3,0xd2,0xcd,0x0c,0x13,0xec,0x5f,0x97,0x44,0x17,0xc4,0xa7,0x7e,0x3d,0x64,0x5d,0x19,0x73,0x60,0x81,0x4f,0xdc,0x22,0x2a,0x90,0x88,0x46,0xee,0xb8,0x14,0xde,0x5e,0x0b,0xdb,0xe0,0x32,0x3a,0x0a,0x49,0x06,0x24,0x5c,0xc2,0xd3,0xac,0x62,0x91,0x95,0xe4,0x79,0xe7,0xc8,0x37,0x6d,0x8d,0xd5,0x4e,0xa9,0x6c,0x56,0xf4,0xea,0x65,0x7a,0xae,0x08,0xba,0x78,0x25,0x2e,0x1c,0xa6,0xb4,0xc6,0xe8,0xdd,0x74,0x1f,0x4b,0xbd,0x8b,0x8a,0x70,0x3e,0xb5,0x66,0x48,0x03,0xf6,0x0e,0x61,0x35,0x57,0xb9,0x86,0xc1,0x1d,0x9e,0xe1,0xf8,0x98,0x11,0x69,0xd9,0x8e,0x94,0x9b,0x1e,0x87,0xe9,0xce,0x55,0x28,0xdf,0x8c,0xa1,0x89,0x0d,0xbf,0xe6,0x42,0x68,0x41,0x99,0x2d,0x0f,0xb0,0x54,0xbb,0x16];
+
+// ─── INIT ─────────────────────────────────────────────────────────────────────
+async function init() {
+  initMatrix('mat-before');
+  initMatrix('mat-after');
+  initSBox();
+  initRTTChart();
+  await refreshAll();
+  connectSocket();
+  log('SYSTEM', 'Admin monitor started. Token validated.', 'success');
+  log('SYSTEM', 'Fetching live data from database...', 'info');
+}
+
+async function refreshAll() {
+  await Promise.all([loadStats(), loadConversations()]);
+}
+
+// ─── API CALLS ────────────────────────────────────────────────────────────────
+async function loadStats() {
+  try {
+    const res = await fetch(API('/admin/api/stats'));
+    if (!res.ok) { log('API', 'Stats fetch failed: ' + res.status, 'error'); return; }
+    const data = await res.json();
+    document.getElementById('stat-users').textContent  = data.total_users   || 0;
+    document.getElementById('stat-msgs').textContent   = data.total_messages || 0;
+    document.getElementById('stat-today').textContent  = data.messages_today || 0;
+    document.getElementById('stat-files').textContent  = data.file_messages  || 0;
+    document.getElementById('hdr-users').textContent   = (data.total_users   || 0) + ' users';
+    document.getElementById('hdr-msgs').textContent    = (data.total_messages|| 0) + ' msgs';
+  } catch(e) { log('API', 'Stats error: ' + e.message, 'error'); }
+}
+
+async function loadConversations() {
+  try {
+    const res = await fetch(API('/admin/api/conversations'));
+    if (!res.ok) { log('API', 'Conversations fetch failed', 'error'); return; }
+    const convs = await res.json();
+    renderConvList(convs);
+    log('API', `Loaded ${convs.length} conversation(s) from DB`, 'info');
+  } catch(e) { log('API', 'Conv error: ' + e.message, 'error'); }
+}
+
+async function loadMessages(userA, userB) {
+  try {
+    const res = await fetch(API(`/admin/api/messages?user_a=${userA}&user_b=${userB}`));
+    if (!res.ok) { log('API', 'Messages fetch failed', 'error'); return; }
+    allMessages = await res.json();
+    renderMessages();
+    log('API', `Loaded ${allMessages.length} message(s) between users ${userA} & ${userB}`, 'success');
+  } catch(e) { log('API', 'Messages error: ' + e.message, 'error'); }
+}
+
+// ─── RENDER ───────────────────────────────────────────────────────────────────
+function renderConvList(convs) {
+  const cl = document.getElementById('conv-list');
+  if (!convs.length) {
+    cl.innerHTML = '<div class="empty-state" style="height:160px"><p>No conversations yet</p></div>';
+    return;
+  }
+  cl.innerHTML = convs.map(c => {
+    const isActive = activePair && activePair.user_a_id == c.user_a_id && activePair.user_b_id == c.user_b_id;
+    const time = c.last_msg_at ? c.last_msg_at.substring(11,16) : '';
+    return `<div class="conv-item ${isActive?'active':''}" onclick="selectConv(${c.user_a_id},${c.user_b_id},'${esc(c.user_a_name)}','${esc(c.user_b_name)}')">
+      <div class="ci-name" style="color:var(--blue)">${esc(c.user_a_name)} ↔ ${esc(c.user_b_name)}</div>
+      <div class="ci-meta">
+        <span class="ci-count">${c.msg_count} msgs</span>
+        <span class="ci-time">${time}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderMessages() {
+  const area = document.getElementById('msgs-area');
+  if (!allMessages.length) {
+    area.innerHTML = '<div class="empty-state"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><p>No messages in this conversation</p></div>';
+    return;
+  }
+  area.innerHTML = '';
+  allMessages.forEach((msg) => {
+    const isOut  = activePair && msg.sender_id == activePair.user_a_id;
+    const dir    = isOut ? 'out' : 'in';
+    const sender = esc(msg.sender_name || 'Unknown');
+    const time   = msg.sent_at ? msg.sent_at.substring(11,16) : '';
+    const encPrev = esc(msg.enc_preview || '');
+    const isActive = activeAnalyzeId === msg.message_id;
+
+    const wrap = document.createElement('div');
+    wrap.className = `msg-wrap ${dir}`;
+    wrap.innerHTML = `
+      <div class="bubble ${dir}">
+        <div style="color:var(--muted);font-size:11px;margin-bottom:5px">[ENCRYPTED · ${esc(msg.message_type)}]</div>
+        <div class="bubble-enc">${encPrev || '—'}</div>
+      </div>
+      <div class="bubble-meta">
+        <span>${sender} · ${time}</span>
+        <span style="font-family:var(--mono);font-size:9px;color:${msg.is_read?'var(--green)':'var(--muted)'}">${msg.is_read?'✓✓ read':'✓ sent'}</span>
+        <button class="analyze-btn ${isActive?'active':''}" onclick="analyzeMessage(${msg.message_id})">
+          ${isActive ? '◉ ANALYZING' : '⊙ ANALYZE'}
+        </button>
+      </div>`;
+    area.appendChild(wrap);
+  });
+  area.scrollTop = area.scrollHeight;
+}
+
+// ─── SELECT CONVERSATION ──────────────────────────────────────────────────────
+async function selectConv(aId, bId, aName, bName) {
+  activePair = { user_a_id: aId, user_b_id: bId, user_a_name: aName, user_b_name: bName };
+  document.getElementById('mid-title').textContent = `${aName} ↔ ${bName}`;
+  document.getElementById('mid-sub').textContent   = `E2E encrypted · AES-256 + RSA-2048 · Admin monitoring active`;
+  renderConvList(await (await fetch(API('/admin/api/conversations'))).json());
+  await loadMessages(aId, bId);
+}
+
+// ─── ANALYZE MESSAGE ──────────────────────────────────────────────────────────
+async function analyzeMessage(msgId) {
+  const msg = allMessages.find(m => m.message_id === msgId);
+  if (!msg) return;
+
+  activeAnalyzeId = msgId;
+  renderMessages();
+
+  // Open terminal
+  showTerminal();
+  document.getElementById('analyzing-ind').style.display = 'inline';
+  document.getElementById('sel-banner').textContent =
+    `Analyzing message #${msgId} · ${msg.sender_name} → ${msg.receiver_name} · ${(msg.sent_at||'').substring(0,16)}`;
+
+  const t0 = performance.now();
+
+  // Fill key details
+  document.getElementById('kv-sender-pub').textContent = msg.sender_pub_key_preview || '(fetch from /admin/api/users)';
+  document.getElementById('kv-recv-pub').textContent   = msg.receiver_pub_key_preview || '(fetch from /admin/api/users)';
+  document.getElementById('kv-enc-aes').textContent    = msg.aes_key_preview || '—';
+  document.getElementById('kv-enc-msg').textContent    = msg.enc_preview || '—';
+  document.getElementById('kv-sizes').textContent      =
+    `Encrypted msg: ${msg.enc_msg_bytes || '?'} bytes · AES key (RSA-wrapped): ${msg.enc_key_bytes || '?'} bytes`;
+
+  // Key format detection
+  const aesKeyPrev = msg.aes_key_preview || '';
+  const isPEM = aesKeyPrev.includes('BEGIN') || aesKeyPrev.length > 200;
+  const isB64 = /^[A-Za-z0-9+/=]+$/.test(aesKeyPrev.replace(/\s/g,''));
+  document.getElementById('kv-key-format').textContent =
+    isPEM ? 'PEM-encoded RSA public key' : isB64 ? 'Base64-encoded RSA-encrypted AES key' : 'Custom format (e:modulus)';
+
+  // Estimate RSA key size
+  const pkLen = (msg.enc_key_bytes || 256);
+  const estBits = pkLen <= 128 ? 1024 : pkLen <= 256 ? 2048 : 4096;
+  document.getElementById('kv-key-bits').textContent = `~${estBits}-bit RSA (estimated from wrapped key size ${pkLen}B)`;
+
+  // Simulate AES block from encrypted preview
+  const encBytes = base64ToBytes(msg.enc_preview || '');
+  const firstBlock = encBytes.slice(0, 16);
+  // Show first 16 bytes as "before" (first block of ciphertext)
+  showMatrix('mat-before', firstBlock);
+
+  // Animate encryption flow
+  const blockCount = Math.ceil((msg.enc_msg_bytes || 32) / 16);
+  await animateFlow(6, 'step-', [
+    `Receiver's RSA pub key (${estBits}-bit) used to wrap random AES-256 key`,
+    `Nk=8, Nr=14 → 15 × round keys (60 × 32-bit words)`,
+    `Plaintext + PKCS#7 padding → ${blockCount} × 16-byte block(s)`,
+    `${blockCount} block(s) × 14 rounds = ${blockCount*14} total AES operations`,
+    `AES key → RSA encrypted: ${(msg.aes_key_preview||'').substring(0,28)}...`,
+    `Base64 stored → messages.encrypted_message (DB: ${msg.enc_msg_bytes||'?'}B)`
+  ]);
+
+  // Animate AES rounds on first ciphertext block
+  await animateRoundsFromBytes(firstBlock);
+
+  // Decrypt flow
+  await animateFlow(4, 'dstep-', [
+    `Receiver loads RSA private key from localStorage / .pem file`,
+    `RSA decrypt: AES key = c^d mod n (${estBits}-bit modular exponentiation)`,
+    `${blockCount} block(s) × 14 inverse rounds (InvSubBytes, InvShiftRows, InvMixCols)`,
+    `PKCS#7 padding removed → original plaintext recovered`
+  ]);
+
+  const elapsed = performance.now() - t0;
+  sessionStats.analyzed++;
+  sessionStats.blocks += blockCount;
+  sessionStats.rounds += blockCount * 14;
+  sessionStats.lastMs  = elapsed;
+  updateSessionStats();
+  addRTTPoint(elapsed);
+
+  document.getElementById('analyzing-ind').style.display = 'none';
+  log('ANALYZE', `#${msgId} — ${blockCount} block(s) — ${elapsed.toFixed(1)}ms — ${msg.sender_name}→${msg.receiver_name}`, 'success');
+}
+
+// ─── TERMINAL TOGGLE ──────────────────────────────────────────────────────────
+function showTerminal() {
+  terminalVisible = true;
+  document.getElementById('right-panel').classList.remove('collapsed');
+  document.getElementById('rp-placeholder').style.display = 'none';
+  const c = document.getElementById('rp-content');
+  c.style.display = 'flex';
+  c.style.flexDirection = 'column';
+  c.style.gap = '8px';
+}
+
+function toggleTerminal() {
+  terminalVisible = !terminalVisible;
+  document.getElementById('right-panel').classList.toggle('collapsed', !terminalVisible);
+}
+
+// ─── AES HELPERS ──────────────────────────────────────────────────────────────
+function base64ToBytes(b64) {
+  try {
+    const bin = atob(b64.replace(/[^A-Za-z0-9+/=]/g,''));
+    return Array.from(bin, c => c.charCodeAt(0));
+  } catch { return new Array(16).fill(0); }
+}
+
+function initMatrix(id) {
+  const g = document.getElementById(id); g.innerHTML = '';
+  for (let i = 0; i < 16; i++) {
+    const c = document.createElement('div');
+    c.className = 'mc'; c.id = id + '-' + i; c.textContent = '--';
+    g.appendChild(c);
+  }
+}
+
+function showMatrix(id, bytes, hl=[]) {
+  for (let i = 0; i < 16; i++) {
+    const cell = document.getElementById(id + '-' + i); if (!cell) continue;
+    cell.textContent = (bytes[i] !== undefined ? bytes[i] : 0).toString(16).padStart(2,'0');
+    cell.className   = 'mc' + (hl.includes(i) ? ' hl' : '');
+  }
+}
+
+function initSBox() {
+  const g = document.getElementById('sbox-grid'); g.innerHTML = '';
+  for (let i = 0; i < 256; i++) {
+    const c = document.createElement('div');
+    c.className = 'sbc'; c.id = 'sb-' + i;
+    c.textContent = S_BOX[i].toString(16).padStart(2,'0');
+    g.appendChild(c);
+  }
+}
+
+function animateSBox(indices) {
+  document.querySelectorAll('.sbc').forEach(c => c.classList.remove('lit'));
+  indices.forEach(i => { const c = document.getElementById('sb-'+i); if(c) c.classList.add('lit'); });
+}
+
+async function animateRoundsFromBytes(inputBlock) {
+  const bar = document.getElementById('rounds-bar');
+  bar.innerHTML = '';
+  for (let i = 0; i < 15; i++) {
+    const d = document.createElement('div'); d.className = 'rp'; d.id = 'pip-'+i; bar.appendChild(d);
+  }
+  // Simulate round progression on ciphertext bytes
+  let block = [...inputBlock];
+  for (let r = 0; r < 15; r++) {
+    document.getElementById('pip-'+r).className = 'rp active';
+    document.getElementById('round-num').textContent = r + 1;
+    // Visual S-Box lookup from current block bytes
+    animateSBox(block.slice(0, 4));
+    // Apply SubBytes visually
+    block = block.map(b => S_BOX[b] || 0);
+    showMatrix('mat-after', block, [0, 5, 10, 15]);
+    await delay(55);
+    document.getElementById('pip-'+r).className = 'rp done';
+  }
+  for (let i = 0; i < 15; i++) document.getElementById('pip-'+i).className = 'rp done';
+  showMatrix('mat-after', block);
+}
+
+function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function animateFlow(n, prefix, values) {
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      const el = document.getElementById(prefix + j);
+      if (el) el.classList.remove('active', 'done');
+    }
+    const el = document.getElementById(prefix + i);
+    if (el) el.classList.add('active');
+    const vid = prefix === 'step-' ? 'sv-' + i : 'dsv-' + i;
+    if (values && values[i]) document.getElementById(vid).textContent = values[i];
+    await delay(250);
+    if (el) { el.classList.remove('active'); el.classList.add('done'); }
+  }
+}
+
+// ─── STATS ────────────────────────────────────────────────────────────────────
+function updateSessionStats() {
+  document.getElementById('s-analyzed').textContent = sessionStats.analyzed;
+  document.getElementById('s-blocks').textContent   = sessionStats.blocks;
+  document.getElementById('s-rounds').textContent   = sessionStats.rounds;
+  document.getElementById('s-time').textContent     = sessionStats.lastMs.toFixed(1) + 'ms';
+}
+
+// ─── RTT CHART ────────────────────────────────────────────────────────────────
+function initRTTChart() {
+  rttChart = new Chart(document.getElementById('rttChart'), {
+    type: 'line',
+    data: { labels: [], datasets: [{ label: 'ms', data: [], borderColor: '#38bdf8', borderWidth: 1.5, pointRadius: 2, pointBackgroundColor: '#38bdf8', fill: true, backgroundColor: 'rgba(56,189,248,0.06)', tension: 0.3 }] },
+    options: { responsive: true, maintainAspectRatio: false, animation: { duration: 150 },
+      plugins: { legend: { display: false } },
+      scales: { x: { display: false }, y: { grid: { color: 'rgba(56,189,248,0.06)' }, ticks: { color: '#64748b', font: { family: "'JetBrains Mono',monospace", size: 8 } }, border: { color: 'rgba(56,189,248,0.1)' } } }
+    }
+  });
+}
+
+function addRTTPoint(ms) {
+  const c = rttChart;
+  c.data.labels.push('');
+  c.data.datasets[0].data.push(parseFloat(ms.toFixed(2)));
+  if (c.data.labels.length > 20) { c.data.labels.shift(); c.data.datasets[0].data.shift(); }
+  c.update('none');
+}
+
+// ─── LOG ──────────────────────────────────────────────────────────────────────
+function log(tag, msg, type='info') {
+  const area = document.getElementById('log-area');
+  if (!area) return;
+  const now = new Date().toTimeString().substring(0,8);
+  const div = document.createElement('div');
+  div.className = 'le';
+  div.innerHTML = `<span class="lt">[${now}]</span><span class="lm ${type}">[${tag}] ${esc(msg)}</span>`;
+  area.appendChild(div);
+  area.scrollTop = area.scrollHeight;
+}
+
+// ─── SOCKET.IO (real-time new messages) ───────────────────────────────────────
+function connectSocket() {
+  try {
+    const socket = io();
+    socket.on('connect', () => {
+      log('SOCKET', 'Real-time connection established', 'success');
+    });
+    socket.on('new_message', (data) => {
+      log('SOCKET', `New message from ${data.sender_username || data.sender_id} (live)`, 'warn');
+      // Reload if this conversation is active
+      if (activePair) {
+        const relevant = data.sender_id == activePair.user_a_id || data.sender_id == activePair.user_b_id;
+        if (relevant) loadMessages(activePair.user_a_id, activePair.user_b_id);
+      }
+      loadStats();
+      loadConversations();
+    });
+    socket.on('disconnect', () => log('SOCKET', 'Real-time connection lost', 'error'));
+  } catch(e) { log('SOCKET', 'Socket.IO not available: ' + e.message, 'warn'); }
+}
+
+// ─── HELPERS ──────────────────────────────────────────────────────────────────
+function esc(t) {
+  if (!t) return '';
+  return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ─── BOOT ─────────────────────────────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>
