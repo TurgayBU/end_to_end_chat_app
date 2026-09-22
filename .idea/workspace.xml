@@ -4,25 +4,10 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="8c83adad-2fa6-4bdd-9f10-efab6078d4bf" name="Changes" comment="First attempt just for messages">
-      <change afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/ChatProject.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/ChatProject.iml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
+    <list default="true" id="8c83adad-2fa6-4bdd-9f10-efab6078d4bf" name="Changes" comment="Cleaned And Last Version Of Chat Application">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/admin_monitor.py" beforeDir="false" afterPath="$PROJECT_DIR$/admin_monitor.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/chat.html" beforeDir="false" afterPath="$PROJECT_DIR$/archieve/chat.html" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/chat.html.b" beforeDir="false" afterPath="$PROJECT_DIR$/archieve/chat.html.b" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/client.py" beforeDir="false" afterPath="$PROJECT_DIR$/archieve/client.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/config.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/decrption.py" beforeDir="false" afterPath="$PROJECT_DIR$/archieve/decrption.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/encryption.py" beforeDir="false" afterPath="$PROJECT_DIR$/archieve/encryption.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/file_decryption.py" beforeDir="false" afterPath="$PROJECT_DIR$/archieve/file_decryption.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/file_encryption.py" beforeDir="false" afterPath="$PROJECT_DIR$/archieve/file_encryption.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/key_creations.py" beforeDir="false" afterPath="$PROJECT_DIR$/archieve/key_creations.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/main copy.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/main.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -134,7 +119,7 @@
       <workItem from="1773386879610" duration="19090000" />
       <workItem from="1773921348140" duration="555000" />
       <workItem from="1773994472404" duration="13640000" />
-      <workItem from="1790073927560" duration="2861000" />
+      <workItem from="1790073927560" duration="3199000" />
     </task>
     <task id="LOCAL-00001" summary="First attempt just for messages">
       <option name="closed" value="true" />
@@ -144,15 +129,35 @@
       <option name="project" value="LOCAL" />
       <updated>1773581716207</updated>
     </task>
-    <option name="localTasksCounter" value="2" />
+    <task id="LOCAL-00002" summary="Cleaned And Last Version Of Chat Application">
+      <option name="closed" value="true" />
+      <created>1790076846582</created>
+      <option name="number" value="00002" />
+      <option name="presentableId" value="LOCAL-00002" />
+      <option name="project" value="LOCAL" />
+      <updated>1790076846582</updated>
+    </task>
+    <option name="localTasksCounter" value="3" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
     <option name="version" value="3" />
   </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State />
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
   <component name="VcsManagerConfiguration">
     <MESSAGE value="First attempt just for messages" />
-    <option name="LAST_COMMIT_MESSAGE" value="First attempt just for messages" />
+    <MESSAGE value="Cleaned And Last Version Of Chat Application" />
+    <option name="LAST_COMMIT_MESSAGE" value="Cleaned And Last Version Of Chat Application" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/ChatProject$file_encryption.coverage" NAME="file_encryption Coverage Results" MODIFIED="1773994501461" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />

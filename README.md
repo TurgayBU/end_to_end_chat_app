@@ -307,9 +307,10 @@ These files can be used as a **reference** for the following topics:
 - The **TCP RTT** and **Congestion Control** charts in the admin panel are for network performance simulation
 - The one-time setup link for the admin panel is printed to the console at server startup
 
-## 👤 Developer
+## 👤 Developers
 
-**TurgayBU** — [GitHub](https://github.com/TurgayBU)
+- **TurgayBU** — [GitHub](https://github.com/TurgayBU)
+- **Radiant28** — [GitHub](https://github.com/Radiant28)
 
 ## 📄 License
 
