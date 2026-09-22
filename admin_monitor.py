@@ -5,7 +5,25 @@ import datetime
 import mysql.connector
 from mysql.connector import Error
 import os
+import secrets
+# ─────────────────────────────────────────────────────────────
+# Tek kullanımlık setup token'ı (sunucu başlatıldığında üretilir)
+# ─────────────────────────────────────────────────────────────
+_ONE_TIME_SETUP_TOKEN = None
+_SETUP_USED = False
 
+def generate_one_time_setup_token():
+    """Sunucu başlatıldığında çağrılır. Rastgele bir setup token üretir."""
+    global _ONE_TIME_SETUP_TOKEN, _SETUP_USED
+    _ONE_TIME_SETUP_TOKEN = secrets.token_urlsafe(32)
+    _SETUP_USED = False
+    return _ONE_TIME_SETUP_TOKEN
+
+def get_setup_token():
+    return _ONE_TIME_SETUP_TOKEN
+
+def is_setup_used():
+    return _SETUP_USED
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 
 # Admin secret key (güvenli bir yerde saklayın)
@@ -45,28 +63,70 @@ def get_db():
         return None
 
 
-@admin_bp.route('/setup', methods=['POST'])
-def admin_setup():
+@admin_bp.route('/setup/<setup_token>', methods=['GET'])
+def admin_setup(setup_token):
     """
-    İlk kurulumda admin token üretir.
-    Body: { "setup_key": "SETUP_KEY_ENV_VALUE" }
+    Tek kullanımlık setup linki.
+    Sunucu başlatıldığında konsola yazdırılan token ile erişilir.
+    Bir kez kullanıldıktan sonra geçersiz olur.
     """
-    setup_key = os.environ.get('SETUP_KEY', 'initial_setup_key')
-    body = request.json or {}
+    global _SETUP_USED, _ONE_TIME_SETUP_TOKEN
 
-    if body.get('setup_key') != setup_key:
-        return jsonify({'error': 'Wrong setup key'}), 403
+    # Daha önce kullanılmış mı?
+    if _SETUP_USED:
+        return """
+        <html>
+        <body style="background:#060a12;color:#f87171;font-family:monospace;padding:40px">
+            <h2>⛔ Setup Linki Zaten Kullanılmış</h2>
+            <p>Bu link tek kullanımlıktır. Sunucuyu yeniden başlatarak yeni bir link alabilirsiniz.</p>
+        </body>
+        </html>
+        """, 403
 
+    # Token geçerli mi?
+    if not _ONE_TIME_SETUP_TOKEN or setup_token != _ONE_TIME_SETUP_TOKEN:
+        return """
+        <html>
+        <body style="background:#060a12;color:#f87171;font-family:monospace;padding:40px">
+            <h2>⛔ Geçersiz Setup Token</h2>
+            <p>Token yanlış veya süresi dolmuş.</p>
+        </body>
+        </html>
+        """, 403
+
+    # Token'ı geçersiz kıl (tek kullanımlık)
+    _SETUP_USED = True
+    _ONE_TIME_SETUP_TOKEN = None
+
+    # Admin JWT token üret
     token = jwt.encode(
         {'role': 'admin', 'exp': datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=365)},
         ADMIN_SECRET, algorithm='HS256'
     )
-    return jsonify({
-        'admin_token': token,
-        'note': 'Store this securely. Add X-Admin-Token header to all /admin/* requests.'
-    })
 
-
+    return f"""
+    <html>
+    <head><title>Admin Setup</title></head>
+    <body style="background:#060a12;color:#e2e8f0;font-family:monospace;padding:40px">
+        <h2 style="color:#34d399">✅ Admin Token Oluşturuldu</h2>
+        <p style="color:#64748b">Bu token'ı güvenli bir yerde saklayın.</p>
+        <div style="background:#111d33;border:1px solid #38bdf8;border-radius:6px;padding:15px;margin:20px 0">
+            <div style="color:#64748b;font-size:11px;margin-bottom:8px">ADMIN TOKEN:</div>
+            <div style="color:#fbbf24;word-break:break-all;font-size:12px">{token}</div>
+        </div>
+        <p>
+            <a href="/admin/monitor?admin_token={token}"
+               style="background:#38bdf8;color:#000;padding:10px 20px;border-radius:5px;
+                      text-decoration:none;font-weight:bold">
+               → Admin Panele Git
+            </a>
+        </p>
+        <p style="color:#f87171;font-size:11px;margin-top:30px">
+            ⚠️ Bu link artık geçersiz. Bir daha kullanılamaz.
+        </p>
+    </body>
+    </html>
+    """
 @admin_bp.route('/api/conversations', methods=['GET'])
 @admin_required
 def get_conversations():

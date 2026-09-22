@@ -760,7 +760,6 @@ def tcp_send_packet():
         'retransmissions': sender_tcp['retransmissions']
     })
 # ==================== MAIN ====================
-
 if __name__ == '__main__':
     print("=" * 60)
     print("🔐 GÜVENLİ MESAJLAŞMA SUNUCUSU".center(60))
@@ -772,8 +771,11 @@ if __name__ == '__main__':
         print("❌ Veritabanı başlatılamadı!")
         exit(1)
 
-    import socket
+    # Tek kullanımlık setup token üret
+    from admin_monitor import generate_one_time_setup_token
+    setup_token = generate_one_time_setup_token()
 
+    import socket
     try:
         hostname = socket.gethostname()
         local_ip = socket.gethostbyname(hostname)
@@ -783,14 +785,15 @@ if __name__ == '__main__':
     print(f"\n🌐 Yerel ağ adresi: http://{local_ip}:5001")
     print("🌍 Localhost: http://localhost:5001")
 
-    print("\n🔐 ADMIN PANEL KURULUMU:")
-    print("-" * 40)
-    print("1. Admin token oluşturun:")
-    print("   curl -X POST http://localhost:5001/admin/setup \\")
-    print("        -H 'Content-Type: application/json' \\")
-    print("        -d '{\"setup_key\": \"initial_setup_key\"}'")
-    print("\n2. Admin panele erişin:")
-    print("   http://localhost:5001/admin/monitor?admin_token=<TOKEN>")
+    print("\n" + "=" * 60)
+    print("🔐 ADMIN SETUP LİNKİ (TEK KULLANIMLIK)".center(60))
+    print("=" * 60)
+    print()
+    print(f"   http://localhost:5001/admin/setup/{setup_token}")
+    print()
+    print("   ⚠️ Bu link SADECE BİR KEZ kullanılabilir!")
+    print("   ⚠️ Kullanıldıktan sonra geçersiz olur.")
+    print("   ⚠️ Sunucu yeniden başlatılırsa yeni link üretilir.")
     print("=" * 60)
 
     print("\n🚀 Sunucu başlatılıyor...")
